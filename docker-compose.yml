@@ -1,0 +1,239 @@
+version: '3.9'
+
+services:
+  # ─────────────────────────────────────────
+  # NuniCord Application Server
+  # ─────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    image: nunicord/app:latest
+    container_name: nunicord_app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-nunicord}
+      POSTGRES_USER: ${POSTGRES_USER:-nunicord}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nunicord_secret}
+
+      # Redis
+      REDIS_URL: redis://redis:6379
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+
+      # App
+      NUNICORD_MODE: ${NUNICORD_MODE:-multi}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+
+      # File uploads
+      UPLOAD_DIR: /uploads
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-100}
+
+      # S3 storage (optional)
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+
+      # Push notifications (VAPID)
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_EMAIL: ${VAPID_EMAIL:-admin@nunicord.local}
+
+      # OAuth (optional)
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      OAUTH_CALLBACK_URL: ${OAUTH_CALLBACK_URL:-http://localhost:3001}
+
+      # TURN server
+      TURN_HOST: ${TURN_HOST:-localhost}
+      TURN_SECRET: ${TURN_SECRET:-nunicord_turn_secret}
+
+      # Rate limiting
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-1000}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - uploads:/uploads
+    ports:
+      - "${APP_PORT:-3001}:3001"
+    networks:
+      - nunicord
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────
+  # PostgreSQL Database
+  # ─────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: nunicord_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nunicord}
+      POSTGRES_USER: ${POSTGRES_USER:-nunicord}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nunicord_secret}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT_EXPOSE:-127.0.0.1:5432}:5432"
+    networks:
+      - nunicord
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nunicord} -d ${POSTGRES_DB:-nunicord}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+        -c max_connections=200
+        -c shared_buffers=256MB
+        -c effective_cache_size=768MB
+        -c maintenance_work_mem=64MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c default_statistics_target=100
+        -c random_page_cost=1.1
+        -c effective_io_concurrency=200
+        -c work_mem=4MB
+        -c min_wal_size=1GB
+        -c max_wal_size=4GB
+
+  # ─────────────────────────────────────────
+  # Redis Cache & Pub/Sub
+  # ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: nunicord_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+        --save 60 1000
+        --save 300 100
+        --save 900 1
+        --appendonly yes
+        --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT_EXPOSE:-127.0.0.1:6379}:6379"
+    networks:
+      - nunicord
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # coturn TURN/STUN Server for WebRTC
+  # ─────────────────────────────────────────
+  coturn:
+    image: coturn/coturn:latest
+    container_name: nunicord_coturn
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_USER: ${TURN_USER:-nunicord}
+      TURN_PASSWORD: ${TURN_PASSWORD:-nunicord_turn}
+      TURN_SECRET: ${TURN_SECRET:-nunicord_turn_secret}
+      TURN_REALM: ${TURN_REALM:-nunicord.local}
+    volumes:
+      - ./docker/coturn.conf:/etc/coturn/turnserver.conf:ro
+      - coturn_logs:/var/log/coturn
+    command: >
+      -n
+      --log-file=stdout
+      --listening-port=3478
+      --tls-listening-port=5349
+      --min-port=49152
+      --max-port=65535
+      --use-auth-secret
+      --static-auth-secret=${TURN_SECRET:-nunicord_turn_secret}
+      --realm=${TURN_REALM:-nunicord.local}
+      --no-tlsv1
+      --no-tlsv1_1
+      --fingerprint
+      --no-stdout-log
+    profiles:
+      - full
+
+  # ─────────────────────────────────────────
+  # Caddy Reverse Proxy (optional)
+  # ─────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: nunicord_caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      CADDY_EMAIL: ${CADDY_EMAIL:-admin@nunicord.local}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - nunicord
+    profiles:
+      - caddy
+      - full
+
+# ─────────────────────────────────────────
+# Networks
+# ─────────────────────────────────────────
+networks:
+  nunicord:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ─────────────────────────────────────────
+# Volumes
+# ─────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  uploads:
+    driver: local
+  coturn_logs:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+  caddy_logs:
+    driver: local

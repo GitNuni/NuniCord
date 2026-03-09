@@ -1,0 +1,49 @@
+{
+    # Global options
+    email {$CADDY_EMAIL}
+    # admin off
+}
+
+{$DOMAIN} {
+    # WebSocket support for Socket.io
+    @websocket {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+
+    # Proxy WebSocket connections
+    handle @websocket {
+        reverse_proxy app:3001
+    }
+
+    # Proxy all requests to the app
+    handle {
+        reverse_proxy app:3001 {
+            header_up X-Forwarded-For {remote}
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    # Compression
+    encode gzip
+
+    # Logging
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+        format json
+    }
+}
