@@ -1,23 +1,27 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Volume2, Mic, MicOff, Video, VideoOff, Monitor, PhoneOff, Users } from 'lucide-react';
+import { Volume2, Mic, MicOff, Video, VideoOff, Monitor, PhoneOff, Users, Menu } from 'lucide-react';
 import { useVoiceStore } from '../../store/voice';
 import { useAuthStore } from '../../store/auth';
+import { useUIStore } from '../../store/ui';
 import {
   joinVoiceChannel, leaveVoiceChannel, updateVoiceState,
-  createVoicePeerConnection, getSocket
+  createVoicePeerConnection, getSocket, watchLocalSpeaking
 } from '../../services/socket';
 import Avatar from '../common/Avatar';
 
 export default function VoiceChannel({ channelId, channelData, serverId }) {
   const {
     activeChannelId, isMuted, isDeafened, isVideo, isScreenSharing,
-    localStream, screenStream, peers,
+    localStream, screenStream, peers, localSpeaking,
     setLocalStream, setScreenStream, toggleMute, toggleDeafen, toggleVideo,
     setActiveVoice, clearVoice,
   } = useVoiceStore();
   const { user } = useAuthStore();
+  const { mobileSidebarOpen, setMobileSidebarOpen } = useUIStore();
   const [joined, setJoined] = useState(false);
   const [screenShareStream, setScreenShareStream] = useState(null);
+  const [viewingScreenShare, setViewingScreenShare] = useState(null); // userId or 'local'
+  const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
   const isActiveChannel = activeChannelId === channelId;
 
@@ -31,6 +35,7 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
       setLocalStream(stream);
       setActiveVoice(channelId, serverId);
       joinVoiceChannel(channelId, serverId);
+      watchLocalSpeaking(stream);
       setJoined(true);
     } catch (err) {
       console.error('Failed to join voice:', err);
@@ -49,14 +54,18 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
       screenStream?.getTracks().forEach(t => t.stop());
       setScreenStream(null);
       getSocket()?.emit('SCREEN_SHARE_STOP', { channel_id: channelId });
+      updateVoiceState({ self_mute: isMuted, self_deaf: isDeafened, self_video: isVideo, self_stream: false, channel_id: channelId, server_id: serverId });
+      setViewingScreenShare(v => v === 'local' ? null : v);
     } else {
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
         setScreenStream(stream);
         getSocket()?.emit('SCREEN_SHARE_START', { channel_id: channelId });
+        updateVoiceState({ self_mute: isMuted, self_deaf: isDeafened, self_video: isVideo, self_stream: true, channel_id: channelId, server_id: serverId });
         stream.getVideoTracks()[0].onended = () => {
           setScreenStream(null);
           getSocket()?.emit('SCREEN_SHARE_STOP', { channel_id: channelId });
+          updateVoiceState({ self_mute: isMuted, self_deaf: isDeafened, self_video: isVideo, self_stream: false, channel_id: channelId, server_id: serverId });
         };
       } catch (err) {
         console.error('Screen share error:', err);
@@ -65,11 +74,30 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
   }
 
   const peerList = Object.entries(peers);
+  const screenSharers = peerList.filter(([_, p]) => p.isScreenSharing);
+  const hasScreenShare = screenSharers.length > 0 || isScreenSharing;
+
+  // Derive the stream to show in screen share viewport
+  const screenShareViewStream = viewingScreenShare === 'local'
+    ? screenStream
+    : viewingScreenShare
+    ? peers[viewingScreenShare]?.stream
+    : null;
 
   return (
     <div className="flex-1 flex flex-col bg-nc-bg-primary">
       {/* Header */}
       <div className="flex items-center h-12 border-b border-black/30 px-4 gap-2">
+        <button
+          onClick={() => setMobileSidebarOpen(o => !o)}
+          style={{
+            background: 'transparent', border: 'none', padding: '4px 6px 4px 0',
+            cursor: 'pointer', color: mobileSidebarOpen ? '#00d4ff' : '#2a5870',
+            transition: 'color 0.2s', display: 'flex', alignItems: 'center', flexShrink: 0,
+          }}
+        >
+          <Menu size={20} />
+        </button>
         <Volume2 size={20} className="text-nc-channel-icon" />
         <span className="font-semibold text-nc-header-primary">{channelData?.name}</span>
         <span className="text-nc-text-muted text-sm ml-2">
@@ -78,55 +106,95 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
       </div>
 
       {/* Main area */}
-      <div className="flex-1 flex items-center justify-center overflow-auto p-4">
+      <div className="flex-1 flex flex-col overflow-auto">
         {!joined ? (
-          <div className="text-center">
-            <Volume2 size={64} className="text-nc-text-muted mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-nc-header-primary mb-2">
-              {channelData?.name}
-            </h2>
-            <p className="text-nc-text-muted mb-6">
-              {peerList.length > 0 ? `${peerList.length} participant(s) in this channel` : 'No one is here yet'}
-            </p>
-            <button onClick={handleJoin} className="nc-btn-primary px-8 py-3 text-base">
-              Join Voice
-            </button>
-          </div>
-        ) : (
-          <div className="w-full">
-            {/* Video grid */}
-            <div className={`grid gap-4 ${peerList.length === 0 ? 'grid-cols-1' : 'grid-cols-2'} max-w-4xl mx-auto`}>
-              {/* Local user */}
-              <ParticipantTile
-                user={user}
-                stream={localStream}
-                isMuted={isMuted}
-                isDeafened={isDeafened}
-                isVideo={isVideo}
-                isSelf
-              />
-
-              {/* Remote peers */}
-              {peerList.map(([userId, peer]) => (
-                <ParticipantTile
-                  key={userId}
-                  user={{ id: userId, username: peer.username, avatar_url: peer.avatar }}
-                  stream={peer.stream}
-                  isMuted={peer.isMuted}
-                  isDeafened={peer.isDeafened}
-                  isVideo={peer.isVideo}
-                  isSpeaking={peer.isSpeaking}
-                  isScreenSharing={peer.isScreenSharing}
-                />
-              ))}
+          <div className="flex-1 flex items-center justify-center p-4">
+            <div className="text-center">
+              <Volume2 size={64} className="text-nc-text-muted mx-auto mb-4" />
+              <h2 className="text-xl font-semibold text-nc-header-primary mb-2">
+                {channelData?.name}
+              </h2>
+              <p className="text-nc-text-muted mb-6">
+                {peerList.length > 0 ? `${peerList.length} participant(s) in this channel` : 'No one is here yet'}
+              </p>
+              <button onClick={handleJoin} className="nc-btn-primary px-8 py-3 text-base">
+                Join Voice
+              </button>
             </div>
           </div>
+        ) : (
+          <>
+            {/* Screen share viewer — max 1/3 height */}
+            {viewingScreenShare && screenShareViewStream && (
+              <div style={{ maxHeight: '33%', flexShrink: 0, background: '#000', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <ScreenShareVideo stream={screenShareViewStream} />
+                <button
+                  onClick={() => setViewingScreenShare(null)}
+                  style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 4, padding: '4px 8px', cursor: 'pointer', fontSize: 12 }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
+
+            {/* Active screen shares bar — click to view */}
+            {hasScreenShare && (
+              <div style={{ display: 'flex', gap: 8, padding: '6px 12px', background: '#040a0f', borderBottom: '1px solid rgba(0,212,255,0.1)', flexShrink: 0, flexWrap: 'wrap' }}>
+                {isScreenSharing && screenStream && (
+                  <button
+                    onClick={() => setViewingScreenShare(v => v === 'local' ? null : 'local')}
+                    style={{ fontSize: 12, color: viewingScreenShare === 'local' ? '#00d4ff' : '#5a8fa8', background: viewingScreenShare === 'local' ? 'rgba(0,212,255,0.1)' : 'transparent', border: '1px solid rgba(0,212,255,0.2)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}
+                  >
+                    <Monitor size={12} style={{ display: 'inline', marginRight: 4 }} />
+                    Your screen
+                  </button>
+                )}
+                {screenSharers.map(([uid, peer]) => (
+                  <button
+                    key={uid}
+                    onClick={() => setViewingScreenShare(v => v === uid ? null : uid)}
+                    style={{ fontSize: 12, color: viewingScreenShare === uid ? '#00d4ff' : '#5a8fa8', background: viewingScreenShare === uid ? 'rgba(0,212,255,0.1)' : 'transparent', border: '1px solid rgba(0,212,255,0.2)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}
+                  >
+                    <Monitor size={12} style={{ display: 'inline', marginRight: 4 }} />
+                    {peer.username}'s screen
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Participant tiles */}
+            <div className="flex-1 flex items-center justify-center p-4">
+              <div className={`grid gap-4 w-full max-w-4xl ${peerList.length === 0 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                <ParticipantTile
+                  user={user}
+                  stream={localStream}
+                  isMuted={isMuted}
+                  isDeafened={isDeafened}
+                  isVideo={isVideo}
+                  isSpeaking={localSpeaking}
+                  isSelf
+                />
+                {peerList.map(([userId, peer]) => (
+                  <ParticipantTile
+                    key={userId}
+                    user={{ id: userId, username: peer.username, avatar_url: peer.avatar }}
+                    stream={peer.stream}
+                    isMuted={peer.isMuted}
+                    isDeafened={peer.isDeafened}
+                    isVideo={peer.isVideo}
+                    isSpeaking={peer.isSpeaking}
+                    isScreenSharing={peer.isScreenSharing}
+                  />
+                ))}
+              </div>
+            </div>
+          </>
         )}
       </div>
 
       {/* Controls */}
       {joined && (
-        <div className="flex items-center justify-center gap-3 py-4 border-t border-black/30">
+        <div className="flex items-center justify-center gap-3 py-4 border-t border-black/30 flex-wrap">
           <ControlButton
             icon={isMuted ? <MicOff size={20} /> : <Mic size={20} />}
             label={isMuted ? 'Unmute' : 'Mute'}
@@ -142,12 +210,14 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
             active={isVideo}
             onClick={toggleVideo}
           />
-          <ControlButton
-            icon={<Monitor size={20} />}
-            label={isScreenSharing ? 'Stop Share' : 'Share Screen'}
-            active={isScreenSharing}
-            onClick={handleScreenShare}
-          />
+          {!isMobile && (
+            <ControlButton
+              icon={<Monitor size={20} />}
+              label={isScreenSharing ? 'Stop Share' : 'Share Screen'}
+              active={isScreenSharing}
+              onClick={handleScreenShare}
+            />
+          )}
           <ControlButton
             icon={<PhoneOff size={20} />}
             label="Disconnect"
@@ -160,8 +230,17 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
   );
 }
 
+function ScreenShareVideo({ stream }) {
+  const videoRef = useRef(null);
+  useEffect(() => {
+    if (videoRef.current && stream) videoRef.current.srcObject = stream;
+  }, [stream]);
+  return <video ref={videoRef} autoPlay playsInline style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />;
+}
+
 function ParticipantTile({ user, stream, isMuted, isDeafened, isVideo, isSpeaking, isScreenSharing, isSelf }) {
   const videoRef = useRef(null);
+  const audioRef = useRef(null);
 
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -169,8 +248,18 @@ function ParticipantTile({ user, stream, isMuted, isDeafened, isVideo, isSpeakin
     }
   }, [stream]);
 
+  // Play remote audio — essential for audio-only mode
+  useEffect(() => {
+    if (!isSelf && audioRef.current && stream) {
+      audioRef.current.srcObject = stream;
+    }
+  }, [stream, isSelf]);
+
   return (
     <div className={`relative rounded-lg overflow-hidden bg-nc-bg-secondary aspect-video flex items-center justify-center ${isSpeaking ? 'speaking' : ''}`}>
+      {/* Hidden audio element for remote peers — plays audio even without video */}
+      {!isSelf && <audio ref={audioRef} autoPlay playsInline style={{ display: 'none' }} />}
+
       {(isVideo || isScreenSharing) && stream ? (
         <video
           ref={videoRef}
@@ -197,7 +286,7 @@ function ParticipantTile({ user, stream, isMuted, isDeafened, isVideo, isSpeakin
         )}
         {isDeafened && (
           <div className="bg-nc-bg-floating/80 rounded p-1">
-            <HeadphoneOff size={14} className="text-nc-red" />
+            <PhoneOff size={14} className="text-nc-red" />
           </div>
         )}
       </div>

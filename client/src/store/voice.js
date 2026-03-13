@@ -11,6 +11,7 @@ export const useVoiceStore = create((set, get) => ({
   isDeafened: false,
   isVideo: false,
   isScreenSharing: false,
+  localSpeaking: false,
   peerConnections: {}, // userId -> RTCPeerConnection
 
   setActiveVoice: (channelId, serverId) => {
@@ -36,12 +37,13 @@ export const useVoiceStore = create((set, get) => ({
       isDeafened: false,
       isVideo: false,
       isScreenSharing: false,
+      localSpeaking: false,
       peerConnections: {},
     });
   },
 
   setLocalStream: (stream) => set({ localStream: stream }),
-  setScreenStream: (stream) => set({ screenStream: stream }),
+  setScreenStream: (stream) => set({ screenStream: stream, isScreenSharing: !!stream }),
 
   toggleMute: () => {
     const { localStream, isMuted } = get();

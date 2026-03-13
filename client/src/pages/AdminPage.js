@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Routes, Route, Link, useNavigate } from 'react-router-dom';
 import {
   BarChart3, Users, Server, Settings, Shield, LogOut,
-  TrendingUp, MessageSquare, UserCheck, AlertTriangle
+  TrendingUp, MessageSquare, UserCheck, AlertTriangle, Clock, CheckCircle, XCircle
 } from 'lucide-react';
 import { useAuthStore } from '../store/auth';
 import api from '../services/api';
@@ -15,8 +15,10 @@ function AdminSidebar() {
   const navItems = [
     { to: '/admin', icon: BarChart3, label: 'Overview' },
     { to: '/admin/users', icon: Users, label: 'Users' },
+    { to: '/admin/pending', icon: Clock, label: 'Pending Approvals' },
     { to: '/admin/servers', icon: Server, label: 'Servers' },
     { to: '/admin/settings', icon: Settings, label: 'Settings' },
+    { to: '/admin/ai', icon: MessageSquare, label: 'Feature Requests' },
   ];
 
   return (
@@ -275,6 +277,114 @@ function AdminUsers() {
   );
 }
 
+function AdminPendingUsers() {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  async function fetchPending() {
+    setLoading(true);
+    try {
+      const { data } = await api.get('/admin/pending-users');
+      setUsers(data);
+    } catch {
+      toast('Failed to load pending users', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { fetchPending(); }, []);
+
+  async function approve(userId, username) {
+    try {
+      await api.post(`/admin/users/${userId}/approve`);
+      toast(`${username} approved`, 'success');
+      setUsers(prev => prev.filter(u => u.id !== userId));
+    } catch {
+      toast('Failed to approve user', 'error');
+    }
+  }
+
+  async function reject(userId, username) {
+    if (!window.confirm(`Reject and delete ${username}'s registration?`)) return;
+    try {
+      await api.post(`/admin/users/${userId}/reject`);
+      toast(`${username} rejected`, 'success');
+      setUsers(prev => prev.filter(u => u.id !== userId));
+    } catch {
+      toast('Failed to reject user', 'error');
+    }
+  }
+
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-nc-header-primary">Pending Approvals</h1>
+        <span className="text-nc-text-muted text-sm">{users.length} pending</span>
+      </div>
+
+      {loading ? (
+        <div className="text-nc-text-muted">Loading...</div>
+      ) : users.length === 0 ? (
+        <div className="bg-nc-bg-secondary rounded-lg border border-nc-divider p-8 text-center text-nc-text-muted">
+          <CheckCircle size={32} className="mx-auto mb-3 text-nc-green opacity-50" />
+          No pending registrations
+        </div>
+      ) : (
+        <div className="bg-nc-bg-secondary rounded-lg border border-nc-divider overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-nc-divider text-nc-text-muted text-sm">
+                <th className="text-left px-4 py-3">User</th>
+                <th className="text-left px-4 py-3">Email</th>
+                <th className="text-left px-4 py-3">Requested</th>
+                <th className="text-right px-4 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(user => (
+                <tr key={user.id} className="border-b border-nc-divider/50 hover:bg-nc-bg-modifier-hover">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-nc-interactive-muted flex items-center justify-center text-white text-xs font-bold">
+                        {(user.display_name || user.username)[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-sm text-nc-text-normal font-medium">{user.display_name || user.username}</div>
+                        <div className="text-xs text-nc-text-muted">@{user.username}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-nc-text-muted">{user.email || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-nc-text-muted">
+                    {new Date(user.created_at).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => approve(user.id, user.username)}
+                        className="flex items-center gap-1 text-xs nc-btn-secondary py-1 px-2 text-nc-green border-nc-green/30 hover:bg-nc-green/10"
+                      >
+                        <CheckCircle size={12} /> Approve
+                      </button>
+                      <button
+                        onClick={() => reject(user.id, user.username)}
+                        className="text-xs nc-btn-danger py-1 px-2"
+                      >
+                        <XCircle size={12} className="inline mr-1" />Reject
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminSettings() {
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
@@ -316,6 +426,12 @@ function AdminSettings() {
             description="Allow new users to register accounts"
             value={settings.registration_open === true || settings.registration_open === 'true'}
             onChange={v => update('registration_open', v)}
+          />
+          <SettingToggle
+            label="Require Admin Approval"
+            description="New registrations must be approved before login is allowed"
+            value={settings.require_approval === true || settings.require_approval === 'true'}
+            onChange={v => update('require_approval', v)}
           />
         </SettingSection>
 
@@ -468,6 +584,90 @@ function AdminServers() {
   );
 }
 
+function AdminAIChat() {
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: 'Hi! I\'m here to help you plan and brainstorm features for NuniCord. What would you like to build or improve?' }
+  ]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  async function send() {
+    if (!input.trim() || loading) return;
+    const userMsg = { role: 'user', content: input.trim() };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput('');
+    setLoading(true);
+    try {
+      const { data } = await api.post('/ai/chat', {
+        messages: newMessages.filter(m => m.role !== 'assistant' || messages.indexOf(m) > 0),
+      });
+      setMessages(prev => [...prev, { role: 'assistant', content: data.content }]);
+    } catch (err) {
+      const errMsg = err.response?.data?.error || 'Failed to get response';
+      setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${errMsg}` }]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-full p-6">
+      <div className="flex items-center gap-3 mb-6">
+        <MessageSquare size={24} className="text-nc-brand" />
+        <div>
+          <h1 className="text-2xl font-bold text-nc-header-primary">Feature Requests</h1>
+          <p className="text-nc-text-muted text-sm">Chat with Claude to brainstorm and plan new features</p>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto min-h-0 space-y-4 mb-4 pr-1">
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+            {msg.role === 'assistant' && (
+              <div className="w-8 h-8 rounded-full bg-nc-brand flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">AI</div>
+            )}
+            <div className={`max-w-2xl rounded-lg px-4 py-3 text-sm ${
+              msg.role === 'user'
+                ? 'bg-nc-brand/20 border border-nc-brand/30 text-nc-text-normal'
+                : 'bg-nc-bg-secondary border border-nc-divider text-nc-text-normal'
+            }`}>
+              <pre className="whitespace-pre-wrap font-sans">{msg.content}</pre>
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex gap-3">
+            <div className="w-8 h-8 rounded-full bg-nc-brand flex items-center justify-center text-white text-xs font-bold flex-shrink-0">AI</div>
+            <div className="bg-nc-bg-secondary border border-nc-divider rounded-lg px-4 py-3 text-nc-text-muted text-sm">Thinking...</div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="flex gap-3 border-t border-nc-divider/40 pt-4">
+        <textarea
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Describe a feature idea or ask for suggestions..."
+          rows={2}
+          className="nc-input flex-1 resize-none"
+          disabled={loading}
+        />
+        <button onClick={send} disabled={loading || !input.trim()} className="nc-btn-primary px-6 self-end">
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { user } = useAuthStore();
 
@@ -491,8 +691,10 @@ export default function AdminPage() {
         <Routes>
           <Route path="/" element={<AdminOverview />} />
           <Route path="/users" element={<AdminUsers />} />
+          <Route path="/pending" element={<AdminPendingUsers />} />
           <Route path="/servers" element={<AdminServers />} />
           <Route path="/settings" element={<AdminSettings />} />
+          <Route path="ai" element={<AdminAIChat />} />
         </Routes>
       </div>
     </div>

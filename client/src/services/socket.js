@@ -3,6 +3,7 @@ import { useMessageStore } from '../store/messages';
 import { useUIStore } from '../store/ui';
 import { useVoiceStore } from '../store/voice';
 import { useServerStore } from '../store/servers';
+import { playSound } from './sounds';
 
 let socket = null;
 
@@ -37,6 +38,10 @@ export function connectSocket(token) {
   // Message events
   socket.on('MESSAGE_CREATE', (message) => {
     useMessageStore.getState().addMessage(message.channel_id, message);
+    const activeChannelId = useServerStore.getState().activeChannelId;
+    if (message.channel_id !== activeChannelId) {
+      useUIStore.getState().markUnread(message.channel_id);
+    }
   });
 
   socket.on('MESSAGE_UPDATE', (message) => {
@@ -70,23 +75,33 @@ export function connectSocket(token) {
 
   // Voice events
   socket.on('VOICE_STATE_UPDATE', (state) => {
+    const { useAuthStore } = require('../store/auth');
+    const currentUser = useAuthStore.getState().user;
+    if (state.user_id === currentUser?.id) return;
     const voiceStore = useVoiceStore.getState();
     if (!state.channel_id) {
       voiceStore.removePeer(state.user_id);
     } else {
       voiceStore.addPeer(state.user_id, {
         channelId: state.channel_id,
+        username: state.username,
+        avatar: state.avatar_url,
         isMuted: state.self_mute,
         isDeafened: state.self_deaf,
         isVideo: state.self_video,
         isScreenSharing: state.self_stream,
       });
+      // Do NOT initiate here — the new joiner initiates via VOICE_MEMBERS.
+      // This prevents the WebRTC "glare" condition where both peers send offers simultaneously.
     }
   });
 
   socket.on('VOICE_MEMBERS', ({ channel_id, members }) => {
+    const { useAuthStore } = require('../store/auth');
+    const currentUser = useAuthStore.getState().user;
     const voiceStore = useVoiceStore.getState();
-    members.forEach(member => {
+    const others = members.filter(m => m.user_id !== currentUser?.id);
+    others.forEach(member => {
       voiceStore.addPeer(member.user_id, {
         channelId: channel_id,
         username: member.display_name || member.username,
@@ -95,6 +110,12 @@ export function connectSocket(token) {
         isDeafened: member.self_deaf,
       });
     });
+    // Initiate RTC connections to all existing members
+    if (voiceStore.localStream) {
+      others.forEach(member => {
+        createVoicePeerConnection(member.user_id, voiceStore.localStream, channel_id);
+      });
+    }
   });
 
   // WebRTC signaling
@@ -108,6 +129,14 @@ export function connectSocket(token) {
 
   socket.on('SCREEN_SHARE_STOP', ({ user_id }) => {
     useVoiceStore.getState().updatePeer(user_id, { isScreenSharing: false });
+  });
+
+  socket.on('SPEAKING', ({ user_id, is_speaking }) => {
+    useVoiceStore.getState().setSpeaking(user_id, is_speaking);
+  });
+
+  socket.on('SOUNDBOARD_PLAY', ({ sound_id }) => {
+    playSound(sound_id);
   });
 
   return socket;
@@ -155,16 +184,20 @@ export function updateStatus(status, customStatus) {
 }
 
 // WebRTC helpers
-const RTCConfig = {
-  iceServers: [
-    { urls: `stun:${process.env.REACT_APP_TURN_HOST || window.location.hostname}:3478` },
-    {
-      urls: `turn:${process.env.REACT_APP_TURN_HOST || window.location.hostname}:3478`,
-      username: process.env.REACT_APP_TURN_USER || 'nunicord',
-      credential: process.env.REACT_APP_TURN_PASS || 'nunicord',
-    },
-  ],
-};
+const iceServers = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+];
+if (process.env.REACT_APP_TURN_HOST) {
+  const turnHost = process.env.REACT_APP_TURN_HOST;
+  iceServers.push({ urls: `stun:${turnHost}:3478` });
+  iceServers.push({
+    urls: `turn:${turnHost}:3478`,
+    username: process.env.REACT_APP_TURN_USER || 'nunicord',
+    credential: process.env.REACT_APP_TURN_PASS || 'nunicord',
+  });
+}
+const RTCConfig = { iceServers };
 
 async function handleRTCOffer({ from_user_id, offer, channel_id }) {
   try {
@@ -215,6 +248,43 @@ async function handleRTCIceCandidate({ from_user_id, candidate }) {
   }
 }
 
+// Audio level analyser — returns a cleanup function
+function watchAudioLevel(stream, onSpeaking) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.3;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let speaking = false;
+    const interval = setInterval(() => {
+      analyser.getByteFrequencyData(data);
+      const avg = data.reduce((a, b) => a + b, 0) / data.length;
+      const isSpeaking = avg > 8;
+      if (isSpeaking !== speaking) {
+        speaking = isSpeaking;
+        onSpeaking(isSpeaking);
+      }
+    }, 80);
+    return () => { clearInterval(interval); ctx.close(); };
+  } catch {
+    return () => {};
+  }
+}
+
+// Call this after getting localStream to show self-speaking indicator
+let localSpeakingCleanup = null;
+export function watchLocalSpeaking(stream) {
+  if (localSpeakingCleanup) localSpeakingCleanup();
+  if (!stream) return;
+  localSpeakingCleanup = watchAudioLevel(stream, (isSpeaking) => {
+    useVoiceStore.setState({ localSpeaking: isSpeaking });
+    socket?.emit('SPEAKING', { is_speaking: isSpeaking });
+  });
+}
+
 function setupPeerConnectionHandlers(pc, userId, channelId) {
   pc.onicecandidate = ({ candidate }) => {
     if (candidate) {
@@ -229,6 +299,13 @@ function setupPeerConnectionHandlers(pc, userId, channelId) {
   pc.ontrack = ({ streams }) => {
     if (streams[0]) {
       useVoiceStore.getState().addPeer(userId, { stream: streams[0] });
+      // Watch remote audio level for speaking indicator
+      const audioTracks = streams[0].getAudioTracks();
+      if (audioTracks.length > 0) {
+        watchAudioLevel(streams[0], (isSpeaking) => {
+          useVoiceStore.getState().setSpeaking(userId, isSpeaking);
+        });
+      }
     }
   };
 

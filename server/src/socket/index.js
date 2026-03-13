@@ -54,18 +54,11 @@ module.exports = function setupSocket(io) {
 
   setupRedisSubscriber();
 
-  async function publishEvent(type, data, room) {
-    const event = { type, data, room };
-    try {
-      const redis = getRedis();
-      await redis.publish(REDIS_CHANNEL, JSON.stringify(event));
-    } catch {
-      // Fallback to direct emit if Redis unavailable
-      if (room) {
-        io.to(room).emit(type, data);
-      } else {
-        io.emit(type, data);
-      }
+  function publishEvent(type, data, room) {
+    if (room) {
+      io.to(room).emit(type, data);
+    } else {
+      io.emit(type, data);
     }
   }
 
@@ -425,6 +418,16 @@ module.exports = function setupSocket(io) {
       });
     });
 
+    socket.on('SPEAKING', (data) => {
+      const { is_speaking } = data;
+      // Broadcast to all users in the same voice channels
+      socket.rooms.forEach(room => {
+        if (room.startsWith('voice:')) {
+          socket.to(room).emit('SPEAKING', { user_id: user.id, is_speaking });
+        }
+      });
+    });
+
     socket.on('SCREEN_SHARE_START', (data) => {
       const { channel_id } = data;
       socket.to(`voice:${channel_id}`).emit('SCREEN_SHARE_START', {
@@ -461,6 +464,19 @@ module.exports = function setupSocket(io) {
           custom_status,
         }, `server:${row.server_id}`);
       }
+    });
+
+    // === SOUNDBOARD ===
+    socket.on('SOUNDBOARD_PLAY', (data) => {
+      const { channel_id, sound_id } = data;
+      if (!channel_id || !sound_id) return;
+      // Broadcast to everyone in the voice channel (including sender)
+      io.to(`voice:${channel_id}`).emit('SOUNDBOARD_PLAY', {
+        sound_id,
+        channel_id,
+        user_id: user.id,
+        username: user.display_name || user.username,
+      });
     });
 
     // === SERVER EVENTS (for bots) ===

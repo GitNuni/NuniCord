@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mic, MicOff, Headphones, HeadphoneOff, Settings, LogOut } from 'lucide-react';
+import { Mic, MicOff, Headphones, VolumeX, Settings, LogOut } from 'lucide-react';
 import { useAuthStore } from '../../store/auth';
 import { useVoiceStore } from '../../store/voice';
 import { updateStatus } from '../../services/socket';
@@ -48,7 +48,7 @@ export default function UserPanel() {
             onClick={() => toggleDeafen()}
             className={`p-1.5 rounded hover:bg-nc-bg-modifier-hover transition-colors ${isDeafened ? 'text-nc-red' : 'text-nc-interactive-normal hover:text-nc-interactive-hover'}`}
           >
-            {isDeafened ? <HeadphoneOff size={18} /> : <Headphones size={18} />}
+            {isDeafened ? <VolumeX size={18} /> : <Headphones size={18} />}
           </button>
         </Tooltip>
 

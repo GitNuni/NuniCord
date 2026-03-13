@@ -3,6 +3,9 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import { registerServiceWorker } from './services/serviceWorker';
+import { loadSavedUserTheme } from './components/settings/UserSettingsModal';
+
+loadSavedUserTheme();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

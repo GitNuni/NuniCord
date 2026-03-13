@@ -12,12 +12,19 @@ export default function ServerSidebar() {
   const { servers } = useServerStore();
   const navigate = useNavigate();
   const { serverId } = useParams();
+  const { mobileSidebarOpen } = useUIStore();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
 
   return (
-    <div className="flex flex-col items-center w-[72px] min-w-[72px] bg-nc-bg-tertiary py-3 gap-2 overflow-y-auto overflow-x-hidden
-                    scrollbar-thin select-none">
+    <div
+      className={`flex flex-col items-center w-[72px] min-w-[72px] bg-nc-bg-tertiary py-3 gap-2 overflow-y-auto overflow-x-hidden
+                  scrollbar-thin select-none
+                  fixed md:relative top-0 left-0 h-full z-50 md:z-auto
+                  transition-transform duration-300 ease-in-out
+                  ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+      onClick={e => e.stopPropagation()}
+    >
       {/* DMs button */}
       <Tooltip content="Direct Messages" side="right">
         <button

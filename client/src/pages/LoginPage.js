@@ -1,118 +1,331 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/auth';
 import { toast } from '../store/ui';
 
 export default function LoginPage() {
-  const [login, setLogin] = useState('');
+  const [login, setLogin] = useState(() => localStorage.getItem('rememberedLogin') || '');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(() => !!localStorage.getItem('rememberedLogin'));
   const [loading, setLoading] = useState(false);
+  const [bootText, setBootText] = useState('');
   const { login: doLogin } = useAuthStore();
   const navigate = useNavigate();
+
+  // Boot sequence text animation
+  useEffect(() => {
+    const lines = [
+      'INITIALIZING CTOS INTERFACE...',
+      'ESTABLISHING SECURE TUNNEL...',
+      'ENCRYPTION PROTOCOL: AES-256',
+      'READY.',
+    ];
+    let i = 0;
+    let charI = 0;
+    let current = '';
+    const iv = setInterval(() => {
+      if (i >= lines.length) { clearInterval(iv); return; }
+      if (charI < lines[i].length) {
+        current += lines[i][charI++];
+        setBootText(current);
+      } else {
+        current = '';
+        charI = 0;
+        i++;
+        if (i < lines.length) setBootText('');
+      }
+    }, 35);
+    return () => clearInterval(iv);
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     try {
       await doLogin(login, password);
+      if (rememberMe) localStorage.setItem('rememberedLogin', login);
+      else localStorage.removeItem('rememberedLogin');
       navigate('/');
     } catch (err) {
-      toast(err.response?.data?.error || 'Login failed', 'error');
+      toast(err.response?.data?.error || 'ACCESS DENIED', 'error');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-nc-bg-tertiary">
-      <div className="w-full max-w-md p-8 bg-nc-bg-primary rounded-lg shadow-2xl">
+    <div
+      style={{
+        minHeight: '100vh',
+        background: '#020609',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: '"Share Tech Mono", "Courier New", monospace',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Hex grid background */}
+      <div className="hex-bg" style={{ position: 'absolute', inset: 0, opacity: 0.6 }} />
+
+      {/* Animated scan line */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0, right: 0,
+          height: 2,
+          background: 'linear-gradient(90deg, transparent, rgba(0,212,255,0.4), transparent)',
+          animation: 'scanline 6s linear infinite',
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Corner decorations */}
+      {['tl','tr','bl','br'].map(pos => (
+        <div
+          key={pos}
+          style={{
+            position: 'fixed',
+            top: pos.startsWith('t') ? 16 : 'auto',
+            bottom: pos.startsWith('b') ? 16 : 'auto',
+            left: pos.endsWith('l') ? 16 : 'auto',
+            right: pos.endsWith('r') ? 16 : 'auto',
+            width: 40, height: 40,
+            borderTop: pos.startsWith('t') ? '1px solid rgba(0,212,255,0.4)' : 'none',
+            borderBottom: pos.startsWith('b') ? '1px solid rgba(0,212,255,0.4)' : 'none',
+            borderLeft: pos.endsWith('l') ? '1px solid rgba(0,212,255,0.4)' : 'none',
+            borderRight: pos.endsWith('r') ? '1px solid rgba(0,212,255,0.4)' : 'none',
+          }}
+        />
+      ))}
+
+      {/* Panel */}
+      <div
+        style={{
+          width: '100%', maxWidth: 420,
+          background: 'rgba(4,10,15,0.95)',
+          border: '1px solid rgba(0,212,255,0.2)',
+          boxShadow: '0 0 40px rgba(0,0,0,0.9), 0 0 80px rgba(0,212,255,0.05)',
+          padding: '40px 36px',
+          position: 'relative',
+          animation: 'boot 0.5s ease-out',
+        }}
+      >
+        {/* Top accent */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 2,
+          background: 'linear-gradient(90deg, transparent, #00d4ff, transparent)',
+        }} />
+        {/* Panel corner brackets */}
+        {['tl','tr','bl','br'].map(pos => (
+          <div key={pos} style={{
+            position: 'absolute',
+            top: pos.startsWith('t') ? -1 : 'auto',
+            bottom: pos.startsWith('b') ? -1 : 'auto',
+            left: pos.endsWith('l') ? -1 : 'auto',
+            right: pos.endsWith('r') ? -1 : 'auto',
+            width: 16, height: 16,
+            borderTop: pos.startsWith('t') ? '2px solid #00d4ff' : 'none',
+            borderBottom: pos.startsWith('b') ? '2px solid #00d4ff' : 'none',
+            borderLeft: pos.endsWith('l') ? '2px solid #00d4ff' : 'none',
+            borderRight: pos.endsWith('r') ? '2px solid #00d4ff' : 'none',
+          }} />
+        ))}
+
         {/* Logo */}
-        <div className="flex justify-center mb-6">
-          <div className="w-16 h-16 bg-nc-brand rounded-2xl flex items-center justify-center text-white text-3xl font-bold">
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div
+            style={{
+              display: 'inline-block',
+              width: 56, height: 56,
+              background: 'transparent',
+              border: '2px solid #00d4ff',
+              clipPath: 'polygon(25% 0%, 75% 0%, 100% 25%, 100% 75%, 75% 100%, 25% 100%, 0% 75%, 0% 25%)',
+              lineHeight: '52px',
+              fontSize: 24,
+              color: '#00d4ff',
+              textAlign: 'center',
+              boxShadow: '0 0 20px rgba(0,212,255,0.4)',
+              marginBottom: 16,
+              animation: 'flicker 8s linear infinite',
+            }}
+          >
             N
+          </div>
+          <div
+            style={{
+              fontSize: 18,
+              letterSpacing: '0.3em',
+              color: '#c0e4f4',
+              textTransform: 'uppercase',
+              fontWeight: 'bold',
+            }}
+            data-text="NUNICORD"
+          >
+            NUNICORD
+          </div>
+          <div style={{ fontSize: 10, color: '#2a5870', letterSpacing: '0.2em', marginTop: 4 }}>
+            SECURE COMMUNICATION TERMINAL
           </div>
         </div>
 
-        <h1 className="text-2xl font-bold text-nc-header-primary text-center mb-2">
-          Welcome back!
-        </h1>
-        <p className="text-nc-text-muted text-center mb-8 text-sm">
-          We're so excited to see you again!
-        </p>
+        {/* Boot text */}
+        <div style={{
+          fontSize: 10, color: '#00d4ff', letterSpacing: '0.1em',
+          marginBottom: 24, minHeight: 14, opacity: 0.7,
+        }}>
+          {bootText}<span style={{ animation: 'flicker 0.8s linear infinite' }}>█</span>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="nc-label">Email or Username</label>
-            <input
-              type="text"
-              value={login}
-              onChange={e => setLogin(e.target.value)}
-              className="nc-input"
-              placeholder="Enter your email or username"
-              required
-              autoFocus
-            />
-          </div>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <CtosField
+            label="IDENTIFIER"
+            type="text"
+            value={login}
+            onChange={e => setLogin(e.target.value)}
+            placeholder="email or username"
+            autoFocus
+          />
+          <CtosField
+            label="PASSKEY"
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="••••••••••••"
+          />
 
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <label className="nc-label mb-0">Password</label>
-              <a href="#" className="text-xs text-nc-brand hover:underline">Forgot your password?</a>
+          {/* Remember me */}
+          <label
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              cursor: 'pointer', userSelect: 'none',
+            }}
+          >
+            <div
+              style={{
+                width: 14, height: 14, flexShrink: 0,
+                border: `1px solid ${rememberMe ? '#00d4ff' : 'rgba(0,212,255,0.3)'}`,
+                background: rememberMe ? 'rgba(0,212,255,0.2)' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.2s',
+              }}
+            >
+              {rememberMe && <span style={{ color: '#00d4ff', fontSize: 10, lineHeight: 1 }}>✓</span>}
             </div>
             <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="nc-input"
-              placeholder="Enter your password"
-              required
+              type="checkbox"
+              checked={rememberMe}
+              onChange={e => setRememberMe(e.target.checked)}
+              style={{ display: 'none' }}
             />
-          </div>
+            <span style={{ fontSize: 10, color: '#2a5870', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+              Remember identifier
+            </span>
+          </label>
 
           <button
             type="submit"
             disabled={loading}
-            className="nc-btn-primary w-full py-2.5 text-sm mt-2"
+            style={{
+              background: loading ? 'rgba(0,212,255,0.1)' : 'rgba(0,212,255,0.15)',
+              border: '1px solid rgba(0,212,255,0.6)',
+              color: '#00d4ff',
+              padding: '12px 0',
+              fontSize: 12,
+              letterSpacing: '0.3em',
+              textTransform: 'uppercase',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              clipPath: 'polygon(12px 0%, 100% 0%, calc(100% - 12px) 100%, 0% 100%)',
+              boxShadow: loading ? 'none' : '0 0 12px rgba(0,212,255,0.3)',
+              transition: 'all 0.2s',
+              width: '100%',
+              marginTop: 8,
+            }}
+            onMouseEnter={e => !loading && (e.currentTarget.style.background = 'rgba(0,212,255,0.25)')}
+            onMouseLeave={e => !loading && (e.currentTarget.style.background = 'rgba(0,212,255,0.15)')}
           >
-            {loading ? 'Logging in...' : 'Log In'}
+            {loading ? 'AUTHENTICATING...' : 'ACCESS SYSTEM'}
           </button>
         </form>
 
-        <p className="text-center text-nc-text-muted text-sm mt-6">
-          Need an account?{' '}
-          <Link to="/register" className="text-nc-brand hover:underline">
-            Register
+        {/* Divider */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '24px 0 16px' }}>
+          <div style={{ flex: 1, height: 1, background: 'rgba(0,212,255,0.1)' }} />
+          <span style={{ fontSize: 9, color: '#1e3d50', letterSpacing: '0.2em' }}>PROTOCOL</span>
+          <div style={{ flex: 1, height: 1, background: 'rgba(0,212,255,0.1)' }} />
+        </div>
+
+        <p style={{ textAlign: 'center', fontSize: 11, color: '#2e5568', letterSpacing: '0.1em' }}>
+          NO ACCESS CREDENTIALS?{' '}
+          <Link
+            to="/register"
+            style={{ color: '#00d4ff', textDecoration: 'none' }}
+            onMouseEnter={e => e.currentTarget.style.textShadow = '0 0 8px rgba(0,212,255,0.8)'}
+            onMouseLeave={e => e.currentTarget.style.textShadow = 'none'}
+          >
+            REQUEST ACCESS
           </Link>
         </p>
 
-        {/* OAuth buttons */}
+        {/* OAuth */}
         {process.env.REACT_APP_OAUTH_GOOGLE === 'true' && (
-          <div className="mt-4">
-            <div className="flex items-center gap-3 my-4">
-              <div className="flex-1 h-px bg-nc-divider" />
-              <span className="text-nc-text-muted text-xs">OR</span>
-              <div className="flex-1 h-px bg-nc-divider" />
-            </div>
-            <a
-              href="/api/auth/google"
-              className="nc-btn-secondary w-full flex items-center justify-center gap-2 py-2.5"
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
-              Continue with Google
-            </a>
-          </div>
-        )}
-
-        {process.env.REACT_APP_OAUTH_GITHUB === 'true' && (
           <a
-            href="/api/auth/github"
-            className="nc-btn-secondary w-full flex items-center justify-center gap-2 py-2.5 mt-2"
+            href="/api/auth/google"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              marginTop: 12, padding: '10px 0',
+              background: 'transparent',
+              border: '1px solid rgba(0,212,255,0.15)',
+              color: '#5a8fa8', fontSize: 11, letterSpacing: '0.1em',
+              textDecoration: 'none', textTransform: 'uppercase',
+            }}
           >
-            <svg width="18" height="18" fill="white" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-            Continue with GitHub
+            <svg width="14" height="14" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+            Google Auth
           </a>
         )}
       </div>
+    </div>
+  );
+}
+
+function CtosField({ label, type, value, onChange, placeholder, autoFocus }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div>
+      <div style={{
+        fontSize: 9, color: focused ? '#00d4ff' : '#2a5870',
+        letterSpacing: '0.2em', textTransform: 'uppercase',
+        marginBottom: 6, transition: 'color 0.2s',
+      }}>
+        {label}
+      </div>
+      <input
+        type={type}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        required
+        style={{
+          width: '100%',
+          background: focused ? '#0d1d28' : '#080f18',
+          border: 'none',
+          borderBottom: `1px solid ${focused ? '#00d4ff' : 'rgba(0,212,255,0.2)'}`,
+          color: '#9ecfdf',
+          padding: '8px 0',
+          fontSize: 13,
+          fontFamily: 'inherit',
+          outline: 'none',
+          letterSpacing: '0.05em',
+          boxShadow: focused ? '0 2px 0 rgba(0,212,255,0.15)' : 'none',
+          transition: 'all 0.2s',
+        }}
+      />
     </div>
   );
 }

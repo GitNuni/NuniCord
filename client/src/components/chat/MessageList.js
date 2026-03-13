@@ -8,61 +8,66 @@ export default function MessageList({ channelId, onReply, currentUser }) {
   const channelData = getChannel(channelId);
   const { messages, loading, hasMore } = channelData;
   const bottomRef = useRef(null);
-  const topRef = useRef(null);
   const containerRef = useRef(null);
-  const [isAtBottom, setIsAtBottom] = useState(true);
-  const [prevMessageCount, setPrevMessageCount] = useState(0);
+  const isAtBottomRef = useRef(true);
+  const prevMessageCountRef = useRef(0);
+  const prevChannelRef = useRef(null);
 
-  // Auto-scroll to bottom on new messages
+  // Scroll to bottom immediately when channel changes
   useEffect(() => {
-    if (isAtBottom && messages.length > prevMessageCount) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (prevChannelRef.current !== channelId) {
+      prevChannelRef.current = channelId;
+      isAtBottomRef.current = true;
+      requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+      });
     }
-    setPrevMessageCount(messages.length);
-  }, [messages.length]);
+  });
 
-  // Scroll to bottom when channel changes
+  // Auto-scroll when new messages arrive and user is at bottom
   useEffect(() => {
-    setTimeout(() => {
-      bottomRef.current?.scrollIntoView({ behavior: 'instant' });
-      setIsAtBottom(true);
-    }, 50);
-  }, [channelId]);
+    if (messages.length > prevMessageCountRef.current && isAtBottomRef.current) {
+      requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+      });
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length]);
 
   const handleScroll = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const { scrollTop, scrollHeight, clientHeight } = container;
-    setIsAtBottom(scrollHeight - scrollTop - clientHeight < 100);
+    isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 100;
 
     // Load more messages when near top
     if (scrollTop < 200 && hasMore && !loading && messages.length > 0) {
       const oldScrollHeight = container.scrollHeight;
       fetchMessages(channelId, messages[0]?.id).then(() => {
-        // Maintain scroll position
         requestAnimationFrame(() => {
           if (containerRef.current) {
-            containerRef.current.scrollTop = containerRef.current.scrollHeight - oldScrollHeight;
+            containerRef.current.scrollTop =
+              containerRef.current.scrollHeight - oldScrollHeight;
           }
         });
       });
     }
   }, [channelId, hasMore, loading, messages, fetchMessages]);
 
-  // Group consecutive messages from same author
   const groupedMessages = groupMessages(messages);
 
   return (
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto flex flex-col-reverse"
+      className="flex-1 overflow-y-auto min-h-0"
+      style={{ overscrollBehavior: 'contain' }}
     >
-      <div ref={bottomRef} />
-
-      <TypingIndicator channelId={channelId} />
-
       <div className="flex flex-col min-h-full justify-end px-0 py-4">
         {loading && messages.length === 0 && (
           <div className="flex items-center justify-center h-32 text-nc-text-muted">
@@ -89,6 +94,9 @@ export default function MessageList({ channelId, onReply, currentUser }) {
             isFirst={idx === 0}
           />
         ))}
+
+        <TypingIndicator channelId={channelId} />
+        <div ref={bottomRef} />
       </div>
     </div>
   );
@@ -105,7 +113,7 @@ function groupMessages(messages) {
     const curr = messages[i];
     const timeDiff = new Date(curr.created_at) - new Date(prev.created_at);
     const sameAuthor = curr.author?.id === prev.author?.id;
-    const closeInTime = timeDiff < 5 * 60 * 1000; // 5 minutes
+    const closeInTime = timeDiff < 5 * 60 * 1000;
     const noReply = !curr.reply_to;
 
     if (sameAuthor && closeInTime && noReply) {

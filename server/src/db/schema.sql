@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS notification_settings (
   level VARCHAR(16) DEFAULT 'default' CHECK (level IN ('all','mentions','none','default')),
   muted BOOLEAN DEFAULT FALSE,
   muted_until TIMESTAMPTZ,
-  PRIMARY KEY (user_id, COALESCE(channel_id, '00000000-0000-0000-0000-000000000000'), COALESCE(server_id, '00000000-0000-0000-0000-000000000000'))
+  UNIQUE (user_id, channel_id, server_id)
 );
 
 -- Forum Posts (extends messages for forum channels)
@@ -346,8 +346,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS users_updated_at ON users;
 CREATE TRIGGER users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS servers_updated_at ON servers;
 CREATE TRIGGER servers_updated_at BEFORE UPDATE ON servers FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS channels_updated_at ON channels;
 CREATE TRIGGER channels_updated_at BEFORE UPDATE ON channels FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- Member count triggers
@@ -363,5 +366,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS server_member_count_insert ON server_members;
 CREATE TRIGGER server_member_count_insert AFTER INSERT ON server_members FOR EACH ROW EXECUTE FUNCTION update_member_count();
+DROP TRIGGER IF EXISTS server_member_count_delete ON server_members;
 CREATE TRIGGER server_member_count_delete AFTER DELETE ON server_members FOR EACH ROW EXECUTE FUNCTION update_member_count();

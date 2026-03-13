@@ -30,7 +30,7 @@ const app = express();
 const server = http.createServer(app);
 
 // Trust proxy for reverse proxy setups
-app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
+app.set('trust proxy', 1);
 
 // Security headers
 app.use(
@@ -93,6 +93,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/auth', setupRoutes);
 app.use('/api/auth', oauthRoutes);
+app.use('/api/ai', require('./api/routes/ai'));
 
 // Passport (OAuth)
 const passport = require('passport');
@@ -178,6 +179,34 @@ async function start() {
       logger.info('No admin user found. Complete setup at:');
       logger.info(`  http://localhost:${PORT}/setup?token=${setupToken}`);
       logger.info('='.repeat(60));
+    }
+
+    // Auto-generate VAPID keys if not set
+    if (!process.env.VAPID_PUBLIC_KEY) {
+      const webpush = require('web-push');
+      try {
+        const stored = await query("SELECT value FROM instance_settings WHERE key = 'vapid_keys'");
+        let keys;
+        if (stored.rows[0]) {
+          keys = JSON.parse(stored.rows[0].value);
+        } else {
+          keys = webpush.generateVAPIDKeys();
+          await query(
+            `INSERT INTO instance_settings (key, value) VALUES ('vapid_keys', $1)
+             ON CONFLICT (key) DO UPDATE SET value = $1`,
+            [JSON.stringify(keys)]
+          );
+          logger.info('Generated VAPID keys for push notifications');
+        }
+        process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+        process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+        webpush.setVapidDetails(
+          `mailto:${process.env.VAPID_EMAIL || 'admin@nunicord.local'}`,
+          keys.publicKey, keys.privateKey
+        );
+      } catch (e) {
+        logger.warn('Could not set up VAPID keys:', e.message);
+      }
     }
 
     server.listen(PORT, '0.0.0.0', () => {

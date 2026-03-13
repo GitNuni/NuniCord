@@ -36,7 +36,8 @@ router.post(
       const settingResult = await query(
         "SELECT value FROM instance_settings WHERE key = 'registration_open'"
       );
-      if (settingResult.rows[0]?.value === 'false') {
+      const regOpen = settingResult.rows[0]?.value;
+      if (regOpen === false || regOpen === 'false') {
         return res.status(403).json({ error: 'Registration is currently closed' });
       }
 
@@ -54,15 +55,28 @@ router.post(
       const password_hash = await bcrypt.hash(password, 12);
       const isFirstUser = (await query('SELECT COUNT(*) FROM users')).rows[0].count === '0';
 
+      // Check if approval is required
+      const approvalSetting = await query(
+        "SELECT value FROM instance_settings WHERE key = 'require_approval'"
+      );
+      const approvalVal = approvalSetting.rows[0]?.value;
+      const requireApproval = !isFirstUser && (approvalVal === true || approvalVal === 'true');
+
       const result = await query(
-        `INSERT INTO users (username, email, password_hash, display_name, is_admin)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id, username, email, display_name, avatar_url, is_admin, created_at`,
-        [username, email || null, password_hash, display_name || username, isFirstUser]
+        `INSERT INTO users (username, email, password_hash, display_name, is_admin, is_banned, ban_reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, username, email, display_name, avatar_url, is_admin, created_at`,
+        [username, email || null, password_hash, display_name || username, isFirstUser,
+         requireApproval, requireApproval ? 'pending_approval' : null]
       );
 
       const user = result.rows[0];
-      const token = generateToken(user.id);
 
+      if (requireApproval) {
+        logger.info(`New user pending approval: ${username}`);
+        return res.status(201).json({ pending: true, message: 'Your account is pending admin approval.' });
+      }
+
+      const token = generateToken(user.id);
       logger.info(`New user registered: ${username}`);
       res.status(201).json({ token, user });
     } catch (err) {
@@ -85,7 +99,7 @@ router.post(
       const { login, password } = req.body;
 
       const result = await query(
-        'SELECT * FROM users WHERE (username = $1 OR email = $1) AND is_bot = FALSE',
+        'SELECT * FROM users WHERE (LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)) AND is_bot = FALSE',
         [login]
       );
 
@@ -94,6 +108,9 @@ router.post(
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
+      if (user.ban_reason === 'pending_approval') {
+        return res.status(403).json({ error: 'Your account is pending admin approval.' });
+      }
       if (user.is_banned) {
         return res.status(403).json({ error: `Account suspended: ${user.ban_reason || 'No reason provided'}` });
       }

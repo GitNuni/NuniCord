@@ -4,13 +4,19 @@ import api from '../../services/api';
 import { useServerStore } from '../../store/servers';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '../../store/ui';
+import Portal from '../common/Portal';
 
 export default function ServerSettingsModal({ serverId, serverData, onClose }) {
   const [tab, setTab] = useState('overview');
-  const [form, setForm] = useState({ name: serverData?.name || '', description: serverData?.description || '' });
+  const [form, setForm] = useState({
+    name: serverData?.name || '',
+    description: serverData?.description || '',
+    system_channel_id: serverData?.system_channel_id || '',
+  });
   const [loading, setLoading] = useState(false);
   const [invites, setInvites] = useState([]);
   const [copied, setCopied] = useState(null);
+  const channels = (serverData?.channels || []).filter(c => c.type === 'text');
   const { updateServer, removeServer } = useServerStore();
   const navigate = useNavigate();
 
@@ -70,36 +76,47 @@ export default function ServerSettingsModal({ serverId, serverData, onClose }) {
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex z-50 animate-fade-in">
-      <div className="m-auto flex w-full max-w-3xl h-[80vh] bg-nc-bg-primary rounded-lg shadow-2xl overflow-hidden animate-slide-up">
-        {/* Sidebar */}
-        <div className="w-48 bg-nc-bg-secondary p-2 flex flex-col">
-          <div className="px-3 py-2 text-xs font-semibold uppercase text-nc-text-muted tracking-wide mb-2">
+    <Portal>
+    <div className="fixed inset-0 bg-black/70 flex z-50 animate-fade-in" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="m-auto flex flex-col md:flex-row w-full md:max-w-3xl h-full md:h-[85vh] bg-nc-bg-primary md:rounded-lg shadow-2xl overflow-hidden animate-slide-up">
+
+        {/* Mobile: top tab bar / Desktop: side panel */}
+        <div className="md:w-48 bg-nc-bg-secondary md:p-2 flex flex-row md:flex-col overflow-x-auto md:overflow-x-visible flex-shrink-0">
+          {/* Server name — desktop only */}
+          <div className="hidden md:block px-3 py-2 text-xs font-semibold uppercase text-nc-text-muted tracking-wide mb-2 truncate">
             {serverData?.name}
           </div>
+          {/* Mobile: close button on left */}
+          <button
+            onClick={onClose}
+            className="md:hidden flex items-center justify-center px-3 py-3 text-nc-interactive-normal hover:text-nc-interactive-hover flex-shrink-0 border-r border-black/20"
+          >
+            <X size={18} />
+          </button>
           {tabs.map(t => (
             <button
               key={t.id}
               onClick={() => { setTab(t.id); if (t.id === 'invites') loadInvites(); }}
-              className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+              className={`flex-shrink-0 md:w-full text-left px-3 py-3 md:py-2 md:rounded text-sm transition-colors whitespace-nowrap ${
                 tab === t.id
-                  ? 'bg-nc-bg-modifier-active text-nc-interactive-active'
+                  ? 'bg-nc-bg-modifier-active text-nc-interactive-active border-b-2 md:border-b-0 border-nc-brand'
                   : 'text-nc-interactive-normal hover:text-nc-interactive-hover hover:bg-nc-bg-modifier-hover'
-              } ${t.id === 'danger' ? 'text-nc-red hover:text-red-400 mt-auto' : ''}`}
+              } ${t.id === 'danger' ? 'md:mt-auto text-nc-red hover:text-red-400' : ''}`}
             >
               {t.label}
             </button>
           ))}
+          {/* Desktop: close button at bottom */}
           <button
             onClick={onClose}
-            className="flex items-center gap-1 px-3 py-2 mt-2 text-sm text-nc-interactive-normal hover:text-nc-interactive-hover"
+            className="hidden md:flex items-center gap-1 px-3 py-2 mt-2 text-sm text-nc-interactive-normal hover:text-nc-interactive-hover"
           >
             <X size={14} /> Esc
           </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-8">
+        <div className="flex-1 overflow-y-auto p-5 md:p-8">
           {tab === 'overview' && (
             <div>
               <h2 className="text-xl font-bold text-nc-header-primary mb-6">Server Overview</h2>
@@ -123,6 +140,23 @@ export default function ServerSettingsModal({ serverId, serverData, onClose }) {
                     maxLength={512}
                     placeholder="Tell people what this server is about..."
                   />
+                </div>
+                <div>
+                  <label className="nc-label">System Messages Channel</label>
+                  <p className="text-xs text-nc-text-muted mb-2">
+                    Join announcements will be posted here. Set to "None" to disable.
+                  </p>
+                  <select
+                    value={form.system_channel_id}
+                    onChange={e => setForm(p => ({ ...p, system_channel_id: e.target.value }))}
+                    className="nc-input"
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <option value="">None</option>
+                    {channels.map(c => (
+                      <option key={c.id} value={c.id}>#{c.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <button onClick={save} disabled={loading} className="nc-btn-primary">
                   {loading ? 'Saving...' : 'Save Changes'}
@@ -181,5 +215,6 @@ export default function ServerSettingsModal({ serverId, serverData, onClose }) {
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

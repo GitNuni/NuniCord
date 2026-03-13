@@ -3,16 +3,19 @@ import { produce } from 'immer';
 
 export const useUIStore = create((set, get) => ({
   sidebarOpen: true,
-  memberListOpen: true,
+  memberListOpen: false,
+  mobileSidebarOpen: false,
   activeModal: null,
   modalData: null,
   toasts: [],
   readStates: {}, // channelId -> { lastReadId, mentionCount }
+  unreadChannels: {}, // channelId -> true
   onlineUsers: {}, // userId -> status
   presenceMap: {}, // serverId -> { userId -> status }
 
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setMemberListOpen: (open) => set({ memberListOpen: open }),
+  setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
   toggleSidebar: () => set(state => ({ sidebarOpen: !state.sidebarOpen })),
   toggleMemberList: () => set(state => ({ memberListOpen: !state.memberListOpen })),
 
@@ -32,6 +35,14 @@ export const useUIStore = create((set, get) => ({
     set(produce(state => {
       state.toasts = state.toasts.filter(t => t.id !== id);
     }));
+  },
+
+  markUnread: (channelId) => {
+    set(produce(state => { state.unreadChannels[channelId] = true; }));
+  },
+
+  clearUnread: (channelId) => {
+    set(produce(state => { delete state.unreadChannels[channelId]; }));
   },
 
   updateReadState: (channelId, lastReadId, mentionCount = 0) => {

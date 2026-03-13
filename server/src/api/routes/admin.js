@@ -133,6 +133,50 @@ router.post('/users/:userId/unban', async (req, res) => {
   }
 });
 
+// GET /admin/pending-users
+router.get('/pending-users', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT id, username, email, display_name, created_at
+       FROM users WHERE ban_reason = 'pending_approval' ORDER BY created_at ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get pending users' });
+  }
+});
+
+// POST /admin/users/:userId/approve
+router.post('/users/:userId/approve', async (req, res) => {
+  try {
+    const result = await query(
+      `UPDATE users SET is_banned = FALSE, ban_reason = NULL WHERE id = $1 AND ban_reason = 'pending_approval'
+       RETURNING id, username`,
+      [req.params.userId]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Pending user not found' });
+    logger.info(`Admin ${req.user.username} approved user ${result.rows[0].username}`);
+    res.json({ message: 'User approved', user: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to approve user' });
+  }
+});
+
+// POST /admin/users/:userId/reject
+router.post('/users/:userId/reject', async (req, res) => {
+  try {
+    const result = await query(
+      `DELETE FROM users WHERE id = $1 AND ban_reason = 'pending_approval' RETURNING username`,
+      [req.params.userId]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Pending user not found' });
+    logger.info(`Admin ${req.user.username} rejected user ${result.rows[0].username}`);
+    res.json({ message: 'User rejected' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reject user' });
+  }
+});
+
 // POST /admin/users/:userId/reset-password
 router.post(
   '/users/:userId/reset-password',

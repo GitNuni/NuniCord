@@ -25,7 +25,10 @@ router.post(
         "SELECT value FROM instance_settings WHERE key = 'setup_token'"
       );
 
-      if (!tokenResult.rows[0] || JSON.parse(tokenResult.rows[0].value) !== token) {
+      const stored = tokenResult.rows[0]?.value;
+      let storedToken;
+      try { storedToken = JSON.parse(stored); } catch { storedToken = stored; }
+      if (!stored || storedToken !== token) {
         return res.status(403).json({ error: 'Invalid setup token' });
       }
 

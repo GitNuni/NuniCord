@@ -6,6 +6,7 @@ const { authenticate } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 const { DEFAULT_PERMISSIONS, Permissions } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
+const { getFullMessage } = require('./messages');
 
 const router = express.Router();
 
@@ -150,6 +151,8 @@ router.patch(
   [
     body('name').optional().trim().isLength({ min: 2, max: 100 }),
     body('description').optional().trim().isLength({ max: 512 }),
+    body('theme').optional().trim().isLength({ max: 32 }),
+    body('system_channel_id').optional({ nullable: true }).custom(v => !v || /^[0-9a-f-]{36}$/.test(v)).withMessage('Invalid channel ID'),
   ],
   validate,
   async (req, res) => {
@@ -160,16 +163,21 @@ router.patch(
       );
       if (!server.rows[0]) return res.status(403).json({ error: 'Forbidden' });
 
-      const { name, description, icon_url, banner_url } = req.body;
+      const { name, description, icon_url, banner_url, theme, system_channel_id } = req.body;
       const result = await query(
         `UPDATE servers SET
           name = COALESCE($1, name),
           description = COALESCE($2, description),
           icon_url = COALESCE($3, icon_url),
           banner_url = COALESCE($4, banner_url),
+          theme = COALESCE($5, theme),
+          system_channel_id = CASE WHEN $7::boolean THEN $6::uuid ELSE system_channel_id END,
           updated_at = NOW()
-         WHERE id = $5 RETURNING *`,
-        [name, description, icon_url, banner_url, req.params.serverId]
+         WHERE id = $8 RETURNING *`,
+        [name, description, icon_url, banner_url, theme,
+         system_channel_id || null,
+         'system_channel_id' in req.body,
+         req.params.serverId]
       );
       res.json(result.rows[0]);
     } catch (err) {
@@ -283,6 +291,35 @@ router.post('/join/:code', authenticate, async (req, res) => {
       );
       await client.query('UPDATE invites SET uses = uses + 1 WHERE id = $1', [inv.id]);
     });
+
+    // Post join announcement if system_channel_id is set
+    try {
+      const serverRow = await query(
+        'SELECT system_channel_id FROM servers WHERE id = $1',
+        [inv.server_id]
+      );
+      const systemChannelId = serverRow.rows[0]?.system_channel_id;
+      if (systemChannelId) {
+        const displayName = req.user.display_name || req.user.username;
+        const announcementContent = `**${displayName}** just joined the server!`;
+        const msgResult = await query(
+          `INSERT INTO messages (channel_id, author_id, content, type)
+           VALUES ($1, $2, $3, 'member_join') RETURNING *`,
+          [systemChannelId, req.user.id, announcementContent]
+        );
+        await query('UPDATE channels SET last_message_id = $1, updated_at = NOW() WHERE id = $2',
+          [msgResult.rows[0].id, systemChannelId]);
+        const fullMsg = await getFullMessage(msgResult.rows[0].id, req.user.id);
+        if (fullMsg) {
+          const io = req.app.get('io');
+          if (io) {
+            io.to(`server:${inv.server_id}`).emit('MESSAGE_CREATE', fullMsg);
+          }
+        }
+      }
+    } catch (announcErr) {
+      logger.warn('Join announcement failed:', announcErr.message);
+    }
 
     res.json({ server_id: inv.server_id, server_name: inv.server_name });
   } catch (err) {

@@ -34,6 +34,7 @@ export const useAuthStore = create((set, get) => ({
 
   register: async (username, email, password, display_name) => {
     const { data } = await api.post('/auth/register', { username, email, password, display_name });
+    if (data.pending) return data;
     localStorage.setItem('token', data.token);
     set({ user: data.user, token: data.token });
     connectSocket(data.token);

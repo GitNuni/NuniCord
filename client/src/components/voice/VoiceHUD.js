@@ -2,6 +2,7 @@ import React from 'react';
 import { PhoneOff, Mic, MicOff } from 'lucide-react';
 import { useVoiceStore } from '../../store/voice';
 import { leaveVoiceChannel } from '../../services/socket';
+import Soundboard from './Soundboard';
 
 export default function VoiceHUD() {
   const { activeChannelId, activeServerId, isMuted, toggleMute, clearVoice } = useVoiceStore();
@@ -40,6 +41,7 @@ export default function VoiceHUD() {
           {isMuted ? <MicOff size={14} /> : <Mic size={14} />}
           {isMuted ? 'Unmute' : 'Mute'}
         </button>
+        <Soundboard />
       </div>
     </div>
   );

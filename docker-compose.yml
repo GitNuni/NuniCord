@@ -31,7 +31,7 @@ services:
       REDIS_URL: redis://redis:6379
 
       # JWT
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_SECRET: L63OUGknyS++RH7TfRGrc+lWxwl11bfwt+Mew/E7H/ROzrz/sC4BUVeH1BbnLKjk
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
 
       # App
@@ -94,7 +94,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nunicord}
       POSTGRES_USER: ${POSTGRES_USER:-nunicord}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nunicord_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:placid87!}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data

@@ -1,9 +1,12 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Plus, Gift, Sticker, Smile, X } from 'lucide-react';
+import { Plus, Smile, X, Image, SendHorizonal } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { sendMessage, startTyping, stopTyping } from '../../services/socket';
 import { useAuthStore } from '../../store/auth';
+import { useServerStore } from '../../store/servers';
 import EmojiPicker from './EmojiPicker';
+import GifPicker from './GifPicker';
+import Soundboard from '../voice/Soundboard';
 import api from '../../services/api';
 import { toast } from '../../store/ui';
 import Avatar from '../common/Avatar';
@@ -14,11 +17,45 @@ export default function MessageInput({ channelId, channelData, replyTo, onCancel
   const [content, setContent] = useState('');
   const [files, setFiles] = useState([]);
   const [showEmoji, setShowEmoji] = useState(false);
+  const [showGif, setShowGif] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [mentionState, setMentionState] = useState(null); // { query, startIdx }
+  const [allMembers, setAllMembers] = useState(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
   const textareaRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const isTypingRef = useRef(false);
+  const containerRef = useRef(null);
+  const membersLoadedRef = useRef(false);
   const { user } = useAuthStore();
+  const { activeServerId } = useServerStore();
+
+  const mentionMatches = mentionState && allMembers
+    ? allMembers.filter(m => {
+        const name = (m.display_name || m.username || '').toLowerCase();
+        return name.includes(mentionState.query.toLowerCase());
+      }).slice(0, 8)
+    : [];
+
+  async function loadMembers() {
+    if (membersLoadedRef.current || !activeServerId) return;
+    membersLoadedRef.current = true;
+    try {
+      const { data } = await api.get(`/servers/${activeServerId}/members`);
+      setAllMembers(Array.isArray(data) ? data : []);
+    } catch { setAllMembers([]); }
+  }
+
+  function insertMention(member) {
+    if (!mentionState || !textareaRef.current) return;
+    const { startIdx } = mentionState;
+    const cursor = textareaRef.current.selectionStart;
+    const newContent = content.slice(0, startIdx) + `<@${member.user_id}>` + content.slice(cursor);
+    setContent(newContent);
+    setMentionState(null);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }
 
   const onDrop = useCallback(async (acceptedFiles) => {
     const oversized = acceptedFiles.filter(f => f.size > MAX_FILE_SIZE);
@@ -30,26 +67,19 @@ export default function MessageInput({ channelId, channelData, replyTo, onCancel
   }, []);
 
   const { getRootProps, getInputProps, isDragActive, open: openFileDialog } = useDropzone({
-    onDrop,
-    noClick: true,
-    noKeyboard: true,
-    maxSize: MAX_FILE_SIZE,
+    onDrop, noClick: true, noKeyboard: true, maxSize: MAX_FILE_SIZE,
   });
 
   function handleTyping() {
-    if (!isTypingRef.current) {
-      startTyping(channelId);
-      isTypingRef.current = true;
-    }
+    if (!isTypingRef.current) { startTyping(channelId); isTypingRef.current = true; }
     clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
-      stopTyping(channelId);
-      isTypingRef.current = false;
+      stopTyping(channelId); isTypingRef.current = false;
     }, 3000);
   }
 
-  async function handleSubmit() {
-    const trimmed = content.trim();
+  async function handleSubmit(customContent) {
+    const trimmed = (customContent ?? content).trim();
     if (!trimmed && files.length === 0) return;
     if (!channelId) return;
 
@@ -58,50 +88,65 @@ export default function MessageInput({ channelId, channelData, replyTo, onCancel
     isTypingRef.current = false;
 
     let attachments = [];
-
     if (files.length > 0) {
       setIsUploading(true);
+      setUploadProgress(0);
       try {
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
         const { data } = await api.post('/uploads/attachments', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (e) => {
+            if (e.total) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+          },
         });
         attachments = data.attachments;
-      } catch (err) {
+      } catch {
         toast('Failed to upload files', 'error');
         setIsUploading(false);
+        setUploadProgress(0);
         return;
       }
       setIsUploading(false);
+      setUploadProgress(0);
     }
 
     sendMessage(channelId, trimmed, replyTo?.id || null, attachments);
     setContent('');
     setFiles([]);
     onCancelReply?.();
-
-    // Resize textarea
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
   }
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
+    if (mentionState && mentionMatches.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => Math.min(i + 1, mentionMatches.length - 1)); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIdx(i => Math.max(0, i - 1)); return; }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); insertMention(mentionMatches[mentionIdx]); return; }
+      if (e.key === 'Escape') { setMentionState(null); return; }
     }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
   }
 
   function handleChange(e) {
-    setContent(e.target.value);
+    const val = e.target.value;
+    setContent(val);
     handleTyping();
+    const ta = e.target;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 350) + 'px';
 
-    // Auto-resize
-    const textarea = e.target;
-    textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, 400) + 'px';
+    // @mention detection
+    const cursor = e.target.selectionStart;
+    const before = val.slice(0, cursor);
+    const atMatch = before.match(/@(\w*)$/);
+    if (atMatch) {
+      setMentionState({ query: atMatch[1], startIdx: cursor - atMatch[1].length - 1 });
+      setMentionIdx(0);
+      loadMembers();
+    } else {
+      setMentionState(null);
+    }
   }
 
   function insertEmoji(emoji) {
@@ -111,104 +156,277 @@ export default function MessageInput({ channelId, channelData, replyTo, onCancel
     textareaRef.current?.focus();
   }
 
-  const channelName = channelData?.name || 'this channel';
+  function insertGif(url) {
+    // Send gif as a message with the URL wrapped in a special format
+    handleSubmit(url);
+    setShowGif(false);
+  }
+
+  const channelName = channelData?.name || 'channel';
 
   return (
-    <div className="px-4 pb-4 flex-shrink-0">
+    <div
+      ref={containerRef}
+      style={{ padding: '8px 16px 14px', flexShrink: 0, position: 'relative' }}
+    >
       {/* Reply preview */}
       {replyTo && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-nc-bg-secondary/50 rounded-t-lg border border-b-0 border-nc-divider text-sm">
-          <span className="text-nc-text-muted">Replying to</span>
-          <span className="font-medium text-nc-interactive-normal">
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 12px',
+            background: '#040a0f',
+            border: '1px solid rgba(0,212,255,0.15)',
+            borderBottom: 'none',
+            fontSize: 12,
+            color: '#5a8fa8',
+          }}
+        >
+          <span>REPLYING TO</span>
+          <span style={{ color: '#00d4ff' }}>
             {replyTo.author?.display_name || replyTo.author?.username}
           </span>
-          <span className="text-nc-text-muted truncate flex-1">
-            {replyTo.content?.slice(0, 100)}
+          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {replyTo.content?.slice(0, 80)}
           </span>
-          <button onClick={onCancelReply} className="text-nc-text-muted hover:text-nc-interactive-hover ml-auto">
-            <X size={16} />
+          <button
+            onClick={onCancelReply}
+            style={{ background: 'none', border: 'none', color: '#2e5568', cursor: 'pointer' }}
+            onMouseEnter={e => e.currentTarget.style.color = '#ff3c00'}
+            onMouseLeave={e => e.currentTarget.style.color = '#2e5568'}
+          >
+            <X size={14} />
           </button>
         </div>
       )}
 
       {/* File preview */}
       {files.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-4 py-2 bg-nc-bg-secondary/50 rounded-t-lg border border-b-0 border-nc-divider">
+        <div
+          style={{
+            display: 'flex', flexWrap: 'wrap', gap: 8,
+            padding: '8px 12px',
+            background: '#040a0f',
+            border: '1px solid rgba(0,212,255,0.15)',
+            borderBottom: 'none',
+          }}
+        >
           {files.map((file, idx) => (
-            <div key={idx} className="relative group">
+            <div key={idx} style={{ position: 'relative' }}>
               {file.type.startsWith('image/') ? (
                 <img
                   src={URL.createObjectURL(file)}
                   alt={file.name}
-                  className="w-24 h-24 object-cover rounded"
+                  style={{ width: 80, height: 80, objectFit: 'cover', border: '1px solid rgba(0,212,255,0.2)' }}
                 />
               ) : (
-                <div className="w-24 h-24 bg-nc-bg-tertiary rounded flex flex-col items-center justify-center p-2 text-center">
-                  <span className="text-2xl">📎</span>
-                  <span className="text-xs text-nc-text-muted truncate w-full">{file.name}</span>
+                <div style={{
+                  width: 80, height: 80,
+                  background: '#0b1820',
+                  border: '1px solid rgba(0,212,255,0.15)',
+                  display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center',
+                  padding: 4, fontSize: 11, color: '#5a8fa8',
+                  textAlign: 'center',
+                }}>
+                  <span style={{ fontSize: 24 }}>📎</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>{file.name}</span>
                 </div>
               )}
               <button
                 onClick={() => setFiles(prev => prev.filter((_, i) => i !== idx))}
-                className="absolute -top-1 -right-1 w-5 h-5 bg-nc-bg-floating rounded-full flex items-center justify-center text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                ×
-              </button>
+                style={{
+                  position: 'absolute', top: -6, right: -6,
+                  width: 16, height: 16,
+                  background: '#ff3c00',
+                  border: 'none', color: '#fff',
+                  cursor: 'pointer', fontSize: 10,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >×</button>
             </div>
           ))}
         </div>
       )}
 
-      {/* Input area */}
+      {/* Main input row */}
       <div
         {...getRootProps()}
-        className={`flex items-end gap-2 bg-nc-bg-secondary rounded-lg px-3 py-2 border ${
-          isDragActive ? 'border-nc-brand border-dashed' : 'border-transparent'
-        }`}
+        style={{
+          display: 'flex', alignItems: 'flex-end', gap: 8,
+          background: '#0b1820',
+          border: `1px solid ${isDragActive ? '#00d4ff' : 'rgba(0,212,255,0.15)'}`,
+          borderStyle: isDragActive ? 'dashed' : 'solid',
+          boxShadow: isDragActive ? '0 0 16px rgba(0,212,255,0.3)' : 'none',
+          padding: '8px 12px',
+          transition: 'border-color 0.2s, box-shadow 0.2s',
+          position: 'relative',
+        }}
       >
         <input {...getInputProps()} />
 
-        <button
-          onClick={openFileDialog}
-          className="flex-shrink-0 p-1 rounded hover:bg-nc-bg-modifier-hover text-nc-interactive-normal hover:text-nc-interactive-hover transition-colors"
-          title="Attach File"
-        >
-          <Plus size={20} />
-        </button>
+        {/* Attach */}
+        <IconBtn onClick={openFileDialog} title="Attach file" disabled={isUploading}>
+          <Plus size={18} />
+        </IconBtn>
 
+        {/* Textarea */}
         <textarea
           ref={textareaRef}
           value={content}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={`Message ${channelData?.type === 'dm' ? '' : '#'}${channelName}`}
+          onPaste={e => {
+            const items = Array.from(e.clipboardData?.items || []);
+            const imageItems = items.filter(item => item.type.startsWith('image/'));
+            if (imageItems.length > 0) {
+              e.preventDefault();
+              const pastedFiles = imageItems.map(item => item.getAsFile()).filter(Boolean);
+              setFiles(prev => [...prev, ...pastedFiles].slice(0, 10));
+            }
+          }}
+          placeholder={`// MSG #${channelName}`}
           rows={1}
-          className="flex-1 bg-transparent text-nc-text-normal placeholder-nc-text-muted text-sm outline-none resize-none max-h-96 leading-relaxed py-1"
           disabled={isUploading}
+          style={{
+            flex: 1,
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            color: '#9ecfdf',
+            fontSize: 14,
+            fontFamily: 'inherit',
+            resize: 'none',
+            maxHeight: 350,
+            lineHeight: 1.5,
+            padding: '2px 0',
+          }}
         />
 
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            onClick={() => setShowEmoji(!showEmoji)}
-            className="p-1 rounded hover:bg-nc-bg-modifier-hover text-nc-interactive-normal hover:text-nc-interactive-hover transition-colors"
-            title="Emoji"
-          >
-            <Smile size={20} />
-          </button>
-        </div>
+        {/* Soundboard */}
+        <Soundboard inChat />
+
+        {/* GIF button */}
+        <IconBtn
+          onClick={() => { setShowGif(!showGif); setShowEmoji(false); }}
+          title="GIF"
+          active={showGif}
+        >
+          <span style={{ fontSize: 11, fontWeight: 'bold', letterSpacing: '-0.05em' }}>GIF</span>
+        </IconBtn>
+
+        {/* Emoji button */}
+        <IconBtn
+          onClick={() => { setShowEmoji(!showEmoji); setShowGif(false); }}
+          title="Emoji"
+          active={showEmoji}
+        >
+          <Smile size={18} />
+        </IconBtn>
+
+        {/* Send button */}
+        <IconBtn
+          onClick={() => handleSubmit()}
+          title="Send"
+          active={!!(content.trim() || files.length > 0) && !isUploading}
+          disabled={(!content.trim() && files.length === 0) || isUploading}
+        >
+          <SendHorizonal size={18} />
+        </IconBtn>
+
+        {/* Upload progress bar */}
+        {isUploading && (
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0 }}>
+            <div style={{ height: 3, background: 'rgba(0,212,255,0.15)', position: 'relative' }}>
+              <div style={{
+                height: '100%',
+                width: `${uploadProgress}%`,
+                background: 'linear-gradient(90deg, #00d4ff, #00ff88)',
+                transition: 'width 0.15s ease',
+                boxShadow: '0 0 8px rgba(0,212,255,0.6)',
+              }} />
+            </div>
+            <div style={{
+              position: 'absolute', right: 8, top: 4,
+              fontSize: 10, color: '#00d4ff', letterSpacing: '0.1em',
+            }}>
+              UPLOADING {uploadProgress}%
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* Drag overlay */}
       {isDragActive && (
-        <div className="absolute inset-0 bg-nc-bg-primary/90 flex items-center justify-center z-50 text-nc-brand text-xl font-semibold pointer-events-none">
-          Drop files to upload
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'rgba(7,13,18,0.92)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 50, pointerEvents: 'none',
+          border: '2px dashed #00d4ff',
+        }}>
+          <div style={{ textAlign: 'center', color: '#00d4ff' }}>
+            <Image size={32} style={{ margin: '0 auto 8px' }} />
+            <div style={{ fontSize: 12, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+              Drop to attach
+            </div>
+          </div>
         </div>
       )}
 
+      {/* @mention dropdown */}
+      {mentionState && mentionMatches.length > 0 && (
+        <div className="mention-dropdown">
+          {mentionMatches.map((member, i) => (
+            <div
+              key={member.user_id}
+              className={`mention-dropdown-item${i === mentionIdx ? ' active' : ''}`}
+              onMouseDown={e => { e.preventDefault(); insertMention(member); }}
+            >
+              <Avatar user={{ id: member.user_id, username: member.username, avatar_url: member.avatar_url }} size={24} />
+              <span style={{ fontWeight: 600 }}>{member.display_name || member.username}</span>
+              {member.display_name && <span style={{ opacity: 0.6, fontSize: 12 }}>@{member.username}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Emoji picker */}
       {showEmoji && (
-        <div className="absolute bottom-20 right-4 z-50">
+        <div style={{ position: 'absolute', bottom: '100%', right: 16, zIndex: 200, marginBottom: 4 }}>
           <EmojiPicker onSelect={insertEmoji} onClose={() => setShowEmoji(false)} />
         </div>
       )}
+
+      {/* GIF picker */}
+      {showGif && (
+        <GifPicker onSelect={insertGif} onClose={() => setShowGif(false)} />
+      )}
     </div>
+  );
+}
+
+function IconBtn({ children, onClick, title, active, disabled }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      style={{
+        background: 'transparent',
+        border: 'none',
+        color: disabled ? '#142030' : active ? '#00d4ff' : '#2a5870',
+        cursor: disabled ? 'default' : 'pointer',
+        padding: '2px 4px',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+        transition: 'color 0.15s',
+        fontFamily: 'inherit',
+      }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.color = '#00d4ff'; }}
+      onMouseLeave={e => { if (!disabled) e.currentTarget.style.color = active ? '#00d4ff' : '#2a5870'; }}
+    >
+      {children}
+    </button>
   );
 }

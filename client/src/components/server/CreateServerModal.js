@@ -4,6 +4,7 @@ import api from '../../services/api';
 import { useServerStore } from '../../store/servers';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '../../store/ui';
+import Portal from '../common/Portal';
 
 export default function CreateServerModal({ onClose }) {
   const [name, setName] = useState('');
@@ -28,6 +29,7 @@ export default function CreateServerModal({ onClose }) {
   }
 
   return (
+    <Portal>
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fade-in">
       <div className="bg-nc-bg-primary rounded-lg shadow-2xl w-full max-w-md p-6 relative animate-slide-up">
         <button onClick={onClose} className="absolute top-4 right-4 text-nc-text-muted hover:text-nc-interactive-hover">
@@ -68,5 +70,6 @@ export default function CreateServerModal({ onClose }) {
         </form>
       </div>
     </div>
+    </Portal>
   );
 }
