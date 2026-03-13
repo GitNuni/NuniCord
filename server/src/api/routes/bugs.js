@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { query } = require('../../db');
-const { authenticate } = require('./auth');
+const { authenticate } = require('../middleware/auth');
 
 let tableReady = false;
 async function ensureTable() {
