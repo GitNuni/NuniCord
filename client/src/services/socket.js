@@ -100,8 +100,9 @@ export function connectSocket(token) {
     } else {
       voiceStore.addPeer(state.user_id, {
         channelId: state.channel_id,
-        username: state.username,
-        avatar: state.avatar_url,
+        // Only update name/avatar if present — don't overwrite with undefined on mute/deafen events
+        ...(state.username != null && { username: state.username }),
+        ...(state.avatar_url != null && { avatar: state.avatar_url }),
         isMuted: state.self_mute,
         isDeafened: state.self_deaf,
         isVideo: state.self_video,
@@ -231,12 +232,17 @@ async function handleRTCOffer({ from_user_id, offer, channel_id }) {
     const voiceStore = useVoiceStore.getState();
     const localStream = voiceStore.localStream;
 
-    const pc = new RTCPeerConnection(RTCConfig);
-    voiceStore.addPeerConnection(from_user_id, pc);
-    setupPeerConnectionHandlers(pc, from_user_id, channel_id);
+    // Reuse existing peer connection for re-negotiation (e.g., screen share added)
+    let pc = voiceStore.peerConnections[from_user_id];
+    const isNew = !pc || pc.connectionState === 'closed' || pc.connectionState === 'failed';
 
-    if (localStream) {
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    if (isNew) {
+      pc = new RTCPeerConnection(RTCConfig);
+      voiceStore.addPeerConnection(from_user_id, pc);
+      setupPeerConnectionHandlers(pc, from_user_id, channel_id);
+      if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      }
     }
 
     await pc.setRemoteDescription(offer);
@@ -323,16 +329,33 @@ function setupPeerConnectionHandlers(pc, userId, channelId) {
     }
   };
 
-  pc.ontrack = ({ streams }) => {
-    if (streams[0]) {
+  // Re-negotiation needed when new tracks are added (e.g., screen share start/stop)
+  pc.onnegotiationneeded = async () => {
+    try {
+      if (pc.signalingState !== 'stable') return;
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket?.emit('RTC_OFFER', {
+        target_user_id: userId,
+        offer: pc.localDescription,
+        channel_id: channelId,
+      });
+    } catch (err) {
+      console.error('Re-negotiation error:', err);
+    }
+  };
+
+  pc.ontrack = ({ track, streams }) => {
+    if (!streams[0]) return;
+    if (track.kind === 'video') {
+      // Screen share or camera video — store separately so audio stream is preserved
+      useVoiceStore.getState().addPeer(userId, { screenStream: streams[0] });
+    } else {
       useVoiceStore.getState().addPeer(userId, { stream: streams[0] });
       // Watch remote audio level for speaking indicator
-      const audioTracks = streams[0].getAudioTracks();
-      if (audioTracks.length > 0) {
-        watchAudioLevel(streams[0], (isSpeaking) => {
-          useVoiceStore.getState().setSpeaking(userId, isSpeaking);
-        });
-      }
+      watchAudioLevel(streams[0], (isSpeaking) => {
+        useVoiceStore.getState().setSpeaking(userId, isSpeaking);
+      });
     }
   };
 

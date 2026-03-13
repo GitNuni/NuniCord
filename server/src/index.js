@@ -25,6 +25,7 @@ const notificationRoutes = require('./api/routes/notifications');
 const userRoutes = require('./api/routes/users');
 const setupRoutes = require('./api/routes/setup');
 const oauthRoutes = require('./api/routes/oauth');
+const bugRoutes = require('./api/routes/bugs');
 
 const app = express();
 const server = http.createServer(app);
@@ -94,6 +95,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/auth', setupRoutes);
 app.use('/api/auth', oauthRoutes);
 app.use('/api/ai', require('./api/routes/ai'));
+app.use('/api/bugs', bugRoutes);
 
 // Passport (OAuth)
 const passport = require('passport');

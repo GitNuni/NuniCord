@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, Mic, MicOff, Video, VideoOff, Monitor, PhoneOff, Headphones } from 'lucide-react';
+import { Volume2, VolumeX, Mic, MicOff, Video, VideoOff, Monitor, PhoneOff, Headphones, Maximize2 } from 'lucide-react';
 import { useVoiceStore } from '../../store/voice';
 import { useAuthStore } from '../../store/auth';
 import {
@@ -11,33 +11,30 @@ import Avatar from '../common/Avatar';
 export default function VoiceChannel({ channelId, channelData, serverId }) {
   const {
     activeChannelId, isMuted, isDeafened, isVideo, isScreenSharing,
-    localStream, screenStream, peers, localSpeaking,
+    localStream, screenStream, peers, localSpeaking, peerConnections,
     setLocalStream, setScreenStream, toggleMute, toggleDeafen, toggleVideo,
     setActiveVoice, clearVoice,
   } = useVoiceStore();
   const { user } = useAuthStore();
 
-  // Initialize joined from store — survives navigation away and back
   const [joined, setJoined] = useState(() => activeChannelId === channelId && !!localStream);
   const [viewingScreenShare, setViewingScreenShare] = useState(null);
   const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
-  // Sync joined if store changes externally (e.g. kicked)
   useEffect(() => {
     if (activeChannelId !== channelId && joined) {
       setJoined(false);
     }
   }, [activeChannelId, channelId]);
 
-  // Only show peers in THIS channel
   const peerList = Object.entries(peers).filter(([, p]) => p.channelId === channelId);
-  const screenSharers = peerList.filter(([, p]) => p.isScreenSharing);
+  const screenSharers = peerList.filter(([, p]) => p.isScreenSharing && p.screenStream);
   const hasScreenShare = screenSharers.length > 0 || isScreenSharing;
 
   const screenShareViewStream = viewingScreenShare === 'local'
     ? screenStream
     : viewingScreenShare
-    ? peers[viewingScreenShare]?.stream
+    ? peers[viewingScreenShare]?.screenStream
     : null;
 
   async function handleJoin() {
@@ -64,6 +61,11 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
   async function handleScreenShare() {
     if (isScreenSharing) {
       screenStream?.getTracks().forEach(t => t.stop());
+      // Remove video senders from all peer connections
+      Object.values(peerConnections).forEach(pc => {
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) pc.removeTrack(sender);
+      });
       setScreenStream(null);
       getSocket()?.emit('SCREEN_SHARE_STOP', { channel_id: channelId });
       updateVoiceState({ self_mute: isMuted, self_deaf: isDeafened, self_video: isVideo, self_stream: false, channel_id: channelId, server_id: serverId });
@@ -72,9 +74,27 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
         setScreenStream(stream);
+        const videoTrack = stream.getVideoTracks()[0];
+
+        // Transmit screen share video track to all connected peers
+        Object.values(peerConnections).forEach(pc => {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(videoTrack);
+          } else {
+            // addTrack triggers onnegotiationneeded → auto re-negotiation
+            pc.addTrack(videoTrack, localStream || stream);
+          }
+        });
+
         getSocket()?.emit('SCREEN_SHARE_START', { channel_id: channelId });
         updateVoiceState({ self_mute: isMuted, self_deaf: isDeafened, self_video: isVideo, self_stream: true, channel_id: channelId, server_id: serverId });
-        stream.getVideoTracks()[0].onended = () => {
+
+        videoTrack.onended = () => {
+          Object.values(peerConnections).forEach(pc => {
+            const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+            if (sender) pc.removeTrack(sender);
+          });
           setScreenStream(null);
           getSocket()?.emit('SCREEN_SHARE_STOP', { channel_id: channelId });
           updateVoiceState({ self_mute: isMuted, self_deaf: isDeafened, self_video: isVideo, self_stream: false, channel_id: channelId, server_id: serverId });
@@ -123,15 +143,10 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
           <>
             {/* Screen share viewer */}
             {viewingScreenShare && screenShareViewStream && (
-              <div style={{ maxHeight: '33%', flexShrink: 0, background: '#000', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <ScreenShareVideo stream={screenShareViewStream} />
-                <button
-                  onClick={() => setViewingScreenShare(null)}
-                  style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}
-                >
-                  Close
-                </button>
-              </div>
+              <ScreenShareViewer
+                stream={screenShareViewStream}
+                onClose={() => setViewingScreenShare(null)}
+              />
             )}
 
             {/* Active screen shares bar */}
@@ -165,9 +180,11 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
                 <ParticipantTile
                   user={user}
                   stream={localStream}
+                  screenStream={screenStream}
                   isMuted={isMuted}
                   isDeafened={isDeafened}
                   isVideo={isVideo}
+                  isScreenSharing={isScreenSharing}
                   isSpeaking={localSpeaking}
                   isSelf
                 />
@@ -176,11 +193,12 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
                     key={userId}
                     user={{ id: userId, username: peer.username, display_name: peer.username, avatar_url: peer.avatar }}
                     stream={peer.stream}
+                    screenStream={peer.screenStream}
                     isMuted={peer.isMuted}
                     isDeafened={peer.isDeafened}
                     isVideo={peer.isVideo}
-                    isSpeaking={peer.isSpeaking}
                     isScreenSharing={peer.isScreenSharing}
+                    isSpeaking={peer.isSpeaking}
                     localIsDeafened={isDeafened}
                   />
                 ))}
@@ -238,59 +256,83 @@ export default function VoiceChannel({ channelId, channelData, serverId }) {
   );
 }
 
-function ScreenShareVideo({ stream }) {
+function ScreenShareViewer({ stream, onClose }) {
   const videoRef = useRef(null);
+  const containerRef = useRef(null);
+
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
       videoRef.current.play().catch(() => {});
     }
   }, [stream]);
-  return <video ref={videoRef} autoPlay playsInline style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />;
+
+  function handleFullscreen() {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      el.requestFullscreen().catch(() => {});
+    }
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ flexShrink: 0, background: '#000', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', maxHeight: '60vh' }}
+    >
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+        onDoubleClick={handleFullscreen}
+      />
+      <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
+        <button
+          onClick={handleFullscreen}
+          style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}
+        >
+          <Maximize2 size={12} />
+          Fullscreen
+        </button>
+        <button
+          onClick={onClose}
+          style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}
+        >
+          Close
+        </button>
+      </div>
+      <p style={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>
+        Double-click to fullscreen
+      </p>
+    </div>
+  );
 }
 
-function ParticipantTile({ user, stream, isMuted, isDeafened, isVideo, isSpeaking, isScreenSharing, isSelf, localIsDeafened }) {
+function ParticipantTile({ user, stream, screenStream, isMuted, isDeafened, isVideo, isSpeaking, isScreenSharing, isSelf, localIsDeafened }) {
   const videoRef = useRef(null);
-  const audioRef = useRef(null);
 
-  // Attach video stream
+  // Attach video/screen stream to the video element
+  const videoStream = isScreenSharing ? screenStream : (isVideo ? stream : null);
+
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    if (videoRef.current && videoStream) {
+      videoRef.current.srcObject = videoStream;
       videoRef.current.play().catch(() => {});
     }
-  }, [stream]);
+  }, [videoStream]);
 
-  // Attach + play remote audio; respect local deafen
-  useEffect(() => {
-    if (isSelf || !audioRef.current) return;
-    if (stream) {
-      audioRef.current.srcObject = stream;
-      audioRef.current.muted = !!localIsDeafened;
-      if (!localIsDeafened) {
-        audioRef.current.play().catch(() => {});
-      }
-    }
-  }, [stream, isSelf, localIsDeafened]);
-
-  // Mute/unmute in real-time when deafen toggles, without re-attaching stream
-  useEffect(() => {
-    if (isSelf || !audioRef.current) return;
-    audioRef.current.muted = !!localIsDeafened;
-    if (!localIsDeafened && audioRef.current.srcObject) {
-      audioRef.current.play().catch(() => {});
-    }
-  }, [localIsDeafened, isSelf]);
+  // Note: audio for remote peers is handled by PersistentVoiceAudio in VoiceHUD
+  // so we don't add audio elements here (would cause double-playback)
 
   return (
     <div
       className={`relative rounded-2xl overflow-hidden aspect-video flex items-center justify-center ${isSpeaking ? 'speaking' : ''}`}
       style={{ background: 'var(--nc-bg-secondary)' }}
     >
-      {/* Hidden audio for remote peers */}
-      {!isSelf && <audio ref={audioRef} playsInline style={{ display: 'none' }} />}
-
-      {(isVideo || isScreenSharing) && stream ? (
+      {(isVideo || isScreenSharing) && videoStream ? (
         <video
           ref={videoRef}
           autoPlay
@@ -301,7 +343,7 @@ function ParticipantTile({ user, stream, isMuted, isDeafened, isVideo, isSpeakin
       ) : (
         <div className="flex flex-col items-center gap-3">
           <Avatar user={user} size={72} />
-          <span className="text-nc-text-normal text-sm font-semibold">
+          <span className="text-sm font-semibold" style={{ color: 'var(--nc-header-primary)' }}>
             {isSelf ? 'You' : (user?.display_name || user?.username)}
           </span>
         </div>

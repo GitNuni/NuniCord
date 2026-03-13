@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
-import { Mic, MicOff, Headphones, VolumeX, Settings, LogOut } from 'lucide-react';
+import { Mic, MicOff, Headphones, VolumeX, Settings, Bug } from 'lucide-react';
 import { useAuthStore } from '../../store/auth';
 import { useVoiceStore } from '../../store/voice';
 import { updateStatus } from '../../services/socket';
 import Avatar from '../common/Avatar';
 import Tooltip from '../common/Tooltip';
 import UserSettingsModal from '../settings/UserSettingsModal';
+import BugReportModal from '../common/BugReportModal';
 
 export default function UserPanel() {
   const { user, logout } = useAuthStore();
   const { isMuted, isDeafened, toggleMute, toggleDeafen } = useVoiceStore();
   const [showSettings, setShowSettings] = useState(false);
+  const [showBugReport, setShowBugReport] = useState(false);
 
   if (!user) return null;
 
@@ -52,6 +54,15 @@ export default function UserPanel() {
           </button>
         </Tooltip>
 
+        <Tooltip content="Report a Bug" side="top">
+          <button
+            onClick={() => setShowBugReport(true)}
+            className="p-1.5 rounded hover:bg-nc-bg-modifier-hover text-nc-interactive-normal hover:text-nc-interactive-hover transition-colors"
+          >
+            <Bug size={18} />
+          </button>
+        </Tooltip>
+
         <Tooltip content="User Settings" side="top">
           <button
             onClick={() => setShowSettings(true)}
@@ -63,6 +74,7 @@ export default function UserPanel() {
       </div>
 
       {showSettings && <UserSettingsModal onClose={() => setShowSettings(false)} />}
+      {showBugReport && <BugReportModal onClose={() => setShowBugReport(false)} />}
     </div>
   );
 }

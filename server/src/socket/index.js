@@ -380,6 +380,8 @@ module.exports = function setupSocket(io) {
           user_id: user.id,
           channel_id,
           server_id,
+          username: user.display_name || user.username,
+          avatar_url: user.avatar_url,
           self_mute,
           self_deaf,
           self_video,

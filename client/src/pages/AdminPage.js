@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Routes, Route, Link, useNavigate } from 'react-router-dom';
 import {
   BarChart3, Users, Server, Settings, Shield, LogOut,
-  TrendingUp, MessageSquare, UserCheck, AlertTriangle, Clock, CheckCircle, XCircle
+  TrendingUp, MessageSquare, UserCheck, AlertTriangle, Clock, CheckCircle, XCircle, Bug
 } from 'lucide-react';
 import { useAuthStore } from '../store/auth';
 import api from '../services/api';
@@ -19,6 +19,7 @@ function AdminSidebar() {
     { to: '/admin/servers', icon: Server, label: 'Servers' },
     { to: '/admin/settings', icon: Settings, label: 'Settings' },
     { to: '/admin/ai', icon: MessageSquare, label: 'Feature Requests' },
+    { to: '/admin/bugs', icon: Bug, label: 'Bug Reports' },
   ];
 
   return (
@@ -695,7 +696,143 @@ export default function AdminPage() {
           <Route path="/servers" element={<AdminServers />} />
           <Route path="/settings" element={<AdminSettings />} />
           <Route path="ai" element={<AdminAIChat />} />
+          <Route path="/bugs" element={<AdminBugReports />} />
         </Routes>
+      </div>
+    </div>
+  );
+}
+
+const STATUS_COLORS = {
+  open: { bg: 'rgba(255,149,0,0.15)', color: '#ff9500' },
+  in_progress: { bg: 'rgba(10,132,255,0.15)', color: '#0a84ff' },
+  resolved: { bg: 'rgba(52,199,89,0.15)', color: '#34c759' },
+  closed: { bg: 'rgba(142,142,147,0.15)', color: '#8e8e93' },
+};
+
+function AdminBugReports() {
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null);
+  const [adminNotes, setAdminNotes] = useState({});
+
+  useEffect(() => {
+    api.get('/bugs').then(r => { setReports(r.data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  async function updateStatus(id, status) {
+    await api.patch(`/bugs/${id}`, { status });
+    setReports(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+  }
+
+  async function saveNotes(id) {
+    await api.patch(`/bugs/${id}`, { admin_notes: adminNotes[id] });
+    setReports(prev => prev.map(r => r.id === id ? { ...r, admin_notes: adminNotes[id] } : r));
+  }
+
+  if (loading) return <div className="p-8 text-nc-text-muted">Loading...</div>;
+
+  return (
+    <div className="p-6 max-w-4xl">
+      <h2 className="text-2xl font-bold text-nc-header-primary mb-1">Bug Reports</h2>
+      <p className="text-nc-text-muted text-sm mb-6">{reports.length} total reports</p>
+
+      {reports.length === 0 && (
+        <div className="text-nc-text-muted text-center py-12">No bug reports yet.</div>
+      )}
+
+      <div className="space-y-3">
+        {reports.map(r => {
+          const colors = STATUS_COLORS[r.status] || STATUS_COLORS.open;
+          const isExpanded = expanded === r.id;
+          return (
+            <div key={r.id} className="rounded-xl border border-nc-divider overflow-hidden"
+                 style={{ background: 'var(--nc-bg-secondary)' }}>
+              {/* Row header */}
+              <div
+                className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-nc-bg-modifier-hover/10"
+                onClick={() => setExpanded(isExpanded ? null : r.id)}
+              >
+                <span
+                  className="px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0"
+                  style={{ background: colors.bg, color: colors.color }}
+                >
+                  {r.status}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-nc-header-primary truncate">{r.title}</p>
+                  <p className="text-xs text-nc-text-muted">
+                    {r.display_name || r.username || 'Deleted user'} · {new Date(r.created_at).toLocaleString()}
+                  </p>
+                </div>
+                <span className="text-nc-text-muted text-xs flex-shrink-0">{isExpanded ? '▲' : '▼'}</span>
+              </div>
+
+              {/* Expanded detail */}
+              {isExpanded && (
+                <div className="px-4 pb-4 border-t border-nc-divider space-y-4">
+                  <div className="mt-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-nc-text-muted mb-1">Description</p>
+                    <p className="text-sm text-nc-text-normal whitespace-pre-wrap">{r.description}</p>
+                  </div>
+
+                  {r.device_info && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-nc-text-muted mb-1">Device Info</p>
+                      <div className="grid grid-cols-2 gap-1 text-xs" style={{ color: 'var(--nc-text-muted)' }}>
+                        {Object.entries(r.device_info).map(([k, v]) => (
+                          <div key={k} className="flex gap-1">
+                            <span className="font-medium text-nc-interactive-normal capitalize">{k.replace(/([A-Z])/g, ' $1')}:</span>
+                            <span className="truncate">{String(v)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-nc-text-muted mb-1">Status</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {['open', 'in_progress', 'resolved', 'closed'].map(s => (
+                        <button
+                          key={s}
+                          onClick={() => updateStatus(r.id, s)}
+                          className="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                          style={{
+                            background: r.status === s ? STATUS_COLORS[s].bg : 'var(--nc-bg-tertiary)',
+                            color: r.status === s ? STATUS_COLORS[s].color : 'var(--nc-interactive-normal)',
+                            border: '1px solid',
+                            borderColor: r.status === s ? STATUS_COLORS[s].color + '55' : 'transparent',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {s.replace('_', ' ')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-nc-text-muted mb-1">Admin Notes</p>
+                    <textarea
+                      className="nc-input w-full resize-none text-sm"
+                      rows={3}
+                      placeholder="Internal notes..."
+                      defaultValue={r.admin_notes || ''}
+                      onChange={e => setAdminNotes(prev => ({ ...prev, [r.id]: e.target.value }))}
+                    />
+                    <button
+                      onClick={() => saveNotes(r.id)}
+                      className="nc-btn-primary px-4 py-1.5 text-xs mt-1"
+                    >
+                      Save Notes
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
