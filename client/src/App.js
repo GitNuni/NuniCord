@@ -7,12 +7,17 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import SetupPage from './pages/SetupPage';
 import AdminPage from './pages/AdminPage';
+import InvitePage from './pages/InvitePage';
 import LoadingScreen from './components/common/LoadingScreen';
 
 function ProtectedRoute({ children }) {
   const { user, isLoading } = useAuthStore();
   if (isLoading) return <LoadingScreen />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    // Remember where they were trying to go so we can redirect after login
+    sessionStorage.setItem('nc_post_login_redirect', window.location.pathname + window.location.search);
+    return <Navigate to="/login" replace />;
+  }
   return children;
 }
 
@@ -40,6 +45,7 @@ export default function App() {
         <Route path="/register" element={<AuthRoute><RegisterPage /></AuthRoute>} />
         <Route path="/setup" element={<SetupPage />} />
         <Route path="/admin/*" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
+        <Route path="/invite/:code" element={<ProtectedRoute><InvitePage /></ProtectedRoute>} />
         <Route path="/*" element={<ProtectedRoute><MainLayout /></ProtectedRoute>} />
       </Routes>
     </Router>

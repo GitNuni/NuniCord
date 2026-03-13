@@ -50,6 +50,25 @@ export function playSound(id) {
   }
 }
 
+export async function playCustomSound(url) {
+  try {
+    const ac = getCtx();
+    if (ac.state === 'suspended') await ac.resume();
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = await ac.decodeAudioData(arrayBuffer);
+    const source = ac.createBufferSource();
+    const gain = ac.createGain();
+    gain.gain.setValueAtTime(0.6, ac.currentTime);
+    source.buffer = audioBuffer;
+    source.connect(gain);
+    gain.connect(ac.destination);
+    source.start();
+  } catch (e) {
+    console.warn('Custom sound playback error:', e);
+  }
+}
+
 const sounds = {
   airhorn(ac, out) {
     // Loud sustained blast

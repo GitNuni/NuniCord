@@ -312,6 +312,16 @@ module.exports = function setupSocket(io) {
       try {
         const { channel_id, server_id } = data;
 
+        // Check if user is switching devices (already has a session in this server)
+        const existing = await query(
+          'SELECT channel_id, session_id FROM voice_states WHERE user_id = $1 AND server_id = $2',
+          [user.id, server_id]
+        );
+        if (existing.rows[0] && existing.rows[0].session_id !== socket.id) {
+          // Tell all peers in the old voice channel to reset their connection to this user
+          io.to(`voice:${existing.rows[0].channel_id}`).emit('PEER_RESET', { user_id: user.id });
+        }
+
         // Update voice state
         await query(
           `INSERT INTO voice_states (user_id, channel_id, server_id, session_id)
@@ -470,11 +480,12 @@ module.exports = function setupSocket(io) {
 
     // === SOUNDBOARD ===
     socket.on('SOUNDBOARD_PLAY', (data) => {
-      const { channel_id, sound_id } = data;
-      if (!channel_id || !sound_id) return;
+      const { channel_id, sound_id, sound_url } = data;
+      if (!channel_id || (!sound_id && !sound_url)) return;
       // Broadcast to everyone in the voice channel (including sender)
       io.to(`voice:${channel_id}`).emit('SOUNDBOARD_PLAY', {
-        sound_id,
+        sound_id: sound_id || null,
+        sound_url: sound_url || null,
         channel_id,
         user_id: user.id,
         username: user.display_name || user.username,

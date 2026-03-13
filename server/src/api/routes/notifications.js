@@ -30,7 +30,7 @@ router.post(
   '/subscribe',
   authenticate,
   [
-    body('endpoint').isURL(),
+    body('endpoint').notEmpty().isString(),
     body('keys.p256dh').notEmpty(),
     body('keys.auth').notEmpty(),
   ],

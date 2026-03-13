@@ -15,6 +15,16 @@ export function registerServiceWorker() {
 
 export async function subscribeToPush() {
   try {
+    // iOS Safari requires PWA mode (Add to Home Screen) for push notifications
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    if (isIOS && !isStandalone) {
+      console.info('Push notifications on iOS require adding the app to your Home Screen.');
+      return null;
+    }
+
+    if (!('PushManager' in window)) return null;
+
     const registration = await navigator.serviceWorker.ready;
     const { data } = await import('./api').then(m => m.default.get('/notifications/vapid-key'));
     if (!data.public_key) return null;
@@ -31,6 +41,14 @@ export async function subscribeToPush() {
     console.error('Push subscription failed:', err);
     return null;
   }
+}
+
+export function isPushSupported() {
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  if (isIOS && !isStandalone) return { supported: false, reason: 'ios-not-pwa' };
+  if (!('PushManager' in window)) return { supported: false, reason: 'not-supported' };
+  return { supported: true };
 }
 
 function urlBase64ToUint8Array(base64String) {

@@ -7,6 +7,7 @@ import {
 import { useVoiceStore } from '../../store/voice';
 import { useAuthStore } from '../../store/auth';
 import { useUIStore } from '../../store/ui';
+import { useServerPermissions } from '../../hooks/useServerPermissions';
 import UserPanel from './UserPanel';
 import VoiceHUD from '../voice/VoiceHUD';
 import CreateChannelModal from '../channel/CreateChannelModal';
@@ -29,6 +30,7 @@ export default function ChannelSidebar({ serverId, serverData, onRefreshServer }
   const [showCreateChannel, setShowCreateChannel] = useState(null);
   const [showServerSettings, setShowServerSettings] = useState(false);
   const voiceState = useVoiceStore();
+  const { canManageChannels, canManageGuild } = useServerPermissions(serverId, serverData);
 
   const categories = serverData?.categories || [];
   const channels = serverData?.channels || [];
@@ -62,9 +64,6 @@ export default function ChannelSidebar({ serverId, serverData, onRefreshServer }
         <ChevronDown size={16} className="text-nc-interactive-normal flex-shrink-0" />
       </button>
 
-      {/* Voice HUD */}
-      {voiceState.activeChannelId && <VoiceHUD />}
-
       {/* Channel list */}
       <div className="flex-1 overflow-y-auto py-2 space-y-0.5">
         {categories.map(category => {
@@ -84,12 +83,14 @@ export default function ChannelSidebar({ serverId, serverData, onRefreshServer }
                     {category.name}
                   </span>
                 </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setShowCreateChannel(category.id); }}
-                  className="opacity-0 group-hover:opacity-100 text-nc-interactive-normal hover:text-nc-interactive-hover transition-opacity"
-                >
-                  <Plus size={14} />
-                </button>
+                {canManageChannels && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowCreateChannel(category.id); }}
+                    className="opacity-0 group-hover:opacity-100 text-nc-interactive-normal hover:text-nc-interactive-hover transition-opacity"
+                  >
+                    <Plus size={14} />
+                  </button>
+                )}
               </div>
 
               {/* Channels in category */}
@@ -101,6 +102,7 @@ export default function ChannelSidebar({ serverId, serverData, onRefreshServer }
                   onClick={() => { navigate(`/channels/${serverId}/channels/${ch.id}`); setMobileSidebarOpen(false); }}
                   serverId={serverId}
                   onRefreshServer={onRefreshServer}
+                  canManage={canManageChannels}
                 />
               ))}
             </div>
@@ -116,9 +118,13 @@ export default function ChannelSidebar({ serverId, serverData, onRefreshServer }
             onClick={() => { navigate(`/channels/${serverId}/channels/${ch.id}`); setMobileSidebarOpen(false); }}
             serverId={serverId}
             onRefreshServer={onRefreshServer}
+            canManage={canManageChannels}
           />
         ))}
       </div>
+
+      {/* Voice HUD */}
+      {voiceState.activeChannelId && <VoiceHUD />}
 
       {/* User Panel */}
       <UserPanel />
@@ -142,7 +148,7 @@ export default function ChannelSidebar({ serverId, serverData, onRefreshServer }
   );
 }
 
-function ChannelItem({ channel, isActive, onClick, serverId, onRefreshServer }) {
+function ChannelItem({ channel, isActive, onClick, serverId, onRefreshServer, canManage }) {
   const Icon = channelTypeIcons[channel.type] || Hash;
   const { activeChannelId, voiceChannels } = useVoiceStore();
   const isInVoice = activeChannelId === channel.id;
@@ -181,12 +187,14 @@ function ChannelItem({ channel, isActive, onClick, serverId, onRefreshServer }) 
           </div>
         )}
 
-        <button
-          className="opacity-0 group-hover:opacity-100 text-nc-interactive-normal hover:text-nc-interactive-hover ml-auto"
-          onClick={(e) => { e.stopPropagation(); setShowSettings(true); }}
-        >
-          <Settings size={14} />
-        </button>
+        {canManage && (
+          <button
+            className="opacity-0 group-hover:opacity-100 text-nc-interactive-normal hover:text-nc-interactive-hover ml-auto"
+            onClick={(e) => { e.stopPropagation(); setShowSettings(true); }}
+          >
+            <Settings size={14} />
+          </button>
+        )}
       </div>
 
       {/* Voice channel participants */}

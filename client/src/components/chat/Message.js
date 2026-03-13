@@ -6,6 +6,7 @@ import { marked } from 'marked';
 import Avatar from '../common/Avatar';
 import EmojiPicker from './EmojiPicker';
 import Portal from '../common/Portal';
+import UserProfileModal from '../common/UserProfileModal';
 import { useAuthStore } from '../../store/auth';
 import { useMessageStore } from '../../store/messages';
 import { getSocket } from '../../services/socket';
@@ -56,6 +57,8 @@ const Message = memo(function Message({ message, isFirst, onReply, currentUser }
   const [editContent, setEditContent] = useState(message.content || '');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const [profileUser, setProfileUser] = useState(null);
+  const [profileAnchor, setProfileAnchor] = useState(null);
   const messageRef = useRef(null);
   const editRef = useRef(null);
   const { user } = useAuthStore();
@@ -149,7 +152,12 @@ const Message = memo(function Message({ message, isFirst, onReply, currentUser }
       {/* Avatar or spacer */}
       <div className="flex-shrink-0 w-10">
         {showFullHeader ? (
-          <Avatar user={message.author} size={40} className="mt-0.5 cursor-pointer" />
+          <button
+            onClick={e => { setProfileUser(message.author); setProfileAnchor(e.currentTarget); }}
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+          >
+            <Avatar user={message.author} size={40} className="mt-0.5" />
+          </button>
         ) : (
           <span className="opacity-0 group-hover:opacity-100 text-xxs text-nc-text-muted leading-none pt-1 select-none block text-right">
             {format(new Date(message.created_at), 'h:mm')}
@@ -174,9 +182,13 @@ const Message = memo(function Message({ message, isFirst, onReply, currentUser }
         {/* Header */}
         {showFullHeader && (
           <div className="flex items-baseline gap-2 mb-0.5">
-            <span className="font-medium text-nc-header-primary cursor-pointer hover:underline">
+            <button
+              onClick={e => { setProfileUser(message.author); setProfileAnchor(e.currentTarget); }}
+              className="font-medium text-nc-header-primary hover:underline"
+              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+            >
               {message.author?.display_name || message.author?.username}
-            </span>
+            </button>
             {message.author?.is_bot && (
               <span className="text-xxs bg-nc-brand text-white px-1 py-0.5 rounded font-bold">BOT</span>
             )}
@@ -280,6 +292,14 @@ const Message = memo(function Message({ message, isFirst, onReply, currentUser }
         <div className="absolute right-4 top-8 z-50">
           <EmojiPicker onSelect={handleReact} onClose={() => setShowEmojiPicker(false)} />
         </div>
+      )}
+
+      {profileUser && (
+        <UserProfileModal
+          user={profileUser}
+          anchorEl={profileAnchor}
+          onClose={() => { setProfileUser(null); setProfileAnchor(null); }}
+        />
       )}
     </div>
   );

@@ -12,6 +12,7 @@ import { useVoiceStore } from '../../store/voice';
 import api from '../../services/api';
 import DMList from '../chat/DMList';
 import WelcomeScreen from '../chat/WelcomeScreen';
+import { onChannelChange } from '../../services/socket';
 
 export default function MainLayout() {
   const { fetchServers } = useServerStore();
@@ -115,6 +116,13 @@ function ServerLayout() {
         .catch(() => {});
     }
   }, [serverId]);
+
+  // Listen for real-time channel changes via socket.js's global listener registry
+  useEffect(() => {
+    return onChannelChange((changedServerId) => {
+      if (changedServerId === serverId) refreshServerData();
+    });
+  }, [serverId, refreshServerData]);
 
   useEffect(() => {
     if (channelId) setActiveChannel(channelId);

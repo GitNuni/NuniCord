@@ -63,19 +63,26 @@ export const useVoiceStore = create((set, get) => ({
   toggleVideo: async () => {
     const { isVideo, localStream, peerConnections } = get();
     if (isVideo) {
-      localStream?.getVideoTracks().forEach(t => { t.stop(); t.enabled = false; });
+      // Stop and remove camera video tracks
+      localStream?.getVideoTracks().forEach(t => { t.stop(); localStream.removeTrack(t); });
+      Object.values(peerConnections).forEach(pc => {
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video' && !s.track?.label?.toLowerCase().includes('screen'));
+        if (sender) pc.removeTrack(sender);
+      });
       set({ isVideo: false });
     } else {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const videoTrack = stream.getVideoTracks()[0];
-        // Add to existing peer connections
+        const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const videoTrack = camStream.getVideoTracks()[0];
+        // Add to localStream so ParticipantTile can render it
+        if (localStream) localStream.addTrack(videoTrack);
+        // Add to existing peer connections (triggers onnegotiationneeded)
         Object.values(peerConnections).forEach(pc => {
           const sender = pc.getSenders().find(s => s.track?.kind === 'video');
           if (sender) {
             sender.replaceTrack(videoTrack);
           } else {
-            pc.addTrack(videoTrack, stream);
+            pc.addTrack(videoTrack, localStream || camStream);
           }
         });
         set({ isVideo: true });
@@ -112,6 +119,12 @@ export const useVoiceStore = create((set, get) => ({
   addPeerConnection: (userId, pc) => {
     set(produce(state => {
       state.peerConnections[userId] = pc;
+    }));
+  },
+
+  removePeerConnection: (userId) => {
+    set(produce(state => {
+      delete state.peerConnections[userId];
     }));
   },
 

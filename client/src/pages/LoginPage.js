@@ -45,7 +45,9 @@ export default function LoginPage() {
       await doLogin(login, password);
       if (rememberMe) localStorage.setItem('rememberedLogin', login);
       else localStorage.removeItem('rememberedLogin');
-      navigate('/');
+      const redirect = sessionStorage.getItem('nc_post_login_redirect');
+      sessionStorage.removeItem('nc_post_login_redirect');
+      navigate(redirect && redirect !== '/login' ? redirect : '/');
     } catch (err) {
       toast(err.response?.data?.error || 'ACCESS DENIED', 'error');
     } finally {

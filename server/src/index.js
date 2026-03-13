@@ -96,6 +96,7 @@ app.use('/api/auth', setupRoutes);
 app.use('/api/auth', oauthRoutes);
 app.use('/api/ai', require('./api/routes/ai'));
 app.use('/api/bugs', bugRoutes);
+app.use('/api/sounds', require('./api/routes/sounds'));
 
 // Passport (OAuth)
 const passport = require('passport');

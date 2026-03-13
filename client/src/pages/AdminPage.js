@@ -1,16 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Routes, Route, Link, useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Users, Server, Settings, Shield, LogOut,
+  BarChart3, Users, Server, Settings, LogOut,
   TrendingUp, MessageSquare, UserCheck, AlertTriangle, Clock, CheckCircle, XCircle, Bug
 } from 'lucide-react';
 import { useAuthStore } from '../store/auth';
 import api from '../services/api';
 import { toast } from '../store/ui';
 
-function AdminSidebar() {
-  const { logout } = useAuthStore();
-  const navigate = useNavigate();
+function AdminSidebar({ onClose }) {
 
   const navItems = [
     { to: '/admin', icon: BarChart3, label: 'Overview' },
@@ -45,13 +43,23 @@ function AdminSidebar() {
       </nav>
 
       <div className="p-2 border-t border-black/20">
-        <Link
-          to="/"
-          className="flex items-center gap-3 px-3 py-2 rounded text-nc-interactive-normal hover:text-nc-interactive-hover hover:bg-nc-bg-modifier-hover text-sm"
-        >
-          <LogOut size={18} />
-          Back to App
-        </Link>
+        {onClose ? (
+          <button
+            onClick={onClose}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded text-nc-interactive-normal hover:text-nc-interactive-hover hover:bg-nc-bg-modifier-hover text-sm text-left"
+          >
+            <LogOut size={18} />
+            Back to App
+          </button>
+        ) : (
+          <Link
+            to="/"
+            className="flex items-center gap-3 px-3 py-2 rounded text-nc-interactive-normal hover:text-nc-interactive-hover hover:bg-nc-bg-modifier-hover text-sm"
+          >
+            <LogOut size={18} />
+            Back to App
+          </Link>
+        )}
       </div>
     </div>
   );
@@ -669,7 +677,7 @@ function AdminAIChat() {
   );
 }
 
-export default function AdminPage() {
+export default function AdminPage({ onClose } = {}) {
   const { user } = useAuthStore();
 
   if (!user?.is_admin) {
@@ -687,7 +695,7 @@ export default function AdminPage() {
 
   return (
     <div className="flex h-full bg-nc-bg-primary">
-      <AdminSidebar />
+      <AdminSidebar onClose={onClose} />
       <div className="flex-1 overflow-y-auto">
         <Routes>
           <Route path="/" element={<AdminOverview />} />
@@ -837,3 +845,5 @@ function AdminBugReports() {
     </div>
   );
 }
+
+export { AdminOverview, AdminUsers, AdminPendingUsers, AdminServers, AdminSettings, AdminAIChat, AdminBugReports };

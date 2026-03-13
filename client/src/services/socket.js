@@ -3,7 +3,17 @@ import { useMessageStore } from '../store/messages';
 import { useUIStore } from '../store/ui';
 import { useVoiceStore } from '../store/voice';
 import { useServerStore } from '../store/servers';
-import { playSound } from './sounds';
+import { playSound, playCustomSound } from './sounds';
+
+// Callbacks registered by components to be notified of channel changes
+const channelChangeListeners = new Set();
+export function onChannelChange(fn) {
+  channelChangeListeners.add(fn);
+  return () => channelChangeListeners.delete(fn);
+}
+function notifyChannelChange(serverId) {
+  channelChangeListeners.forEach(fn => fn(serverId));
+}
 
 let socket = null;
 
@@ -163,8 +173,37 @@ export function connectSocket(token) {
     useVoiceStore.getState().setSpeaking(user_id, is_speaking);
   });
 
-  socket.on('SOUNDBOARD_PLAY', ({ sound_id }) => {
-    playSound(sound_id);
+  socket.on('SOUNDBOARD_PLAY', ({ sound_id, sound_url }) => {
+    if (sound_url) {
+      playCustomSound(sound_url);
+    } else if (sound_id) {
+      playSound(sound_id);
+    }
+  });
+
+  // Device-switching: tear down stale peer connection before new session begins
+  socket.on('PEER_RESET', ({ user_id }) => {
+    const voiceStore = useVoiceStore.getState();
+    const pc = voiceStore.peerConnections[user_id];
+    if (pc) { try { pc.close(); } catch {} }
+    voiceStore.removePeerConnection(user_id);
+    voiceStore.removePeer(user_id);
+  });
+
+  // Channel real-time updates
+  socket.on('CHANNEL_CREATE', (channel) => {
+    useServerStore.getState().addChannel(channel);
+    notifyChannelChange(channel.server_id);
+  });
+
+  socket.on('CHANNEL_UPDATE', (channel) => {
+    useServerStore.getState().updateChannel(channel);
+    notifyChannelChange(channel.server_id);
+  });
+
+  socket.on('CHANNEL_DELETE', ({ id, server_id }) => {
+    useServerStore.getState().removeChannel(id, server_id);
+    notifyChannelChange(server_id);
   });
 
   return socket;

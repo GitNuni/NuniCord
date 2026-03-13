@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { useUIStore } from '../../store/ui';
 import Avatar from '../common/Avatar';
+import UserProfileModal from '../common/UserProfileModal';
 
 export default function MemberList({ serverId }) {
   const [members, setMembers] = useState([]);
@@ -50,6 +51,9 @@ export default function MemberList({ serverId }) {
 }
 
 function MemberGroup({ title, members, onlineUsers, muted = false }) {
+  const [profileUser, setProfileUser] = useState(null);
+  const [profileAnchor, setProfileAnchor] = useState(null);
+
   return (
     <div className="mb-4">
       <div className="px-4 mb-1 text-xs font-semibold uppercase tracking-wide text-nc-interactive-muted">
@@ -58,17 +62,16 @@ function MemberGroup({ title, members, onlineUsers, muted = false }) {
       {members.map(member => {
         const status = onlineUsers[member.user_id] || member.status || 'offline';
         const displayName = member.nickname || member.display_name || member.username;
+        const userObj = { id: member.user_id, username: member.username, display_name: member.display_name, avatar_url: member.avatar_url, status, custom_status: member.custom_status, bio: member.bio, pronouns: member.pronouns };
 
         return (
           <div
             key={member.id}
             className={`flex items-center gap-3 px-2 mx-2 py-1 rounded cursor-pointer hover:bg-nc-bg-modifier-hover group ${muted ? 'opacity-50' : ''}`}
+            onClick={e => { setProfileUser(userObj); setProfileAnchor(e.currentTarget); }}
           >
             <div className="relative flex-shrink-0">
-              <Avatar
-                user={{ id: member.user_id, username: member.username, avatar_url: member.avatar_url }}
-                size={32}
-              />
+              <Avatar user={userObj} size={32} />
               <span className={`status-indicator absolute -bottom-0.5 -right-0.5 status-${status}`} />
             </div>
             <div className="min-w-0 flex-1">
@@ -87,6 +90,14 @@ function MemberGroup({ title, members, onlineUsers, muted = false }) {
           </div>
         );
       })}
+
+      {profileUser && (
+        <UserProfileModal
+          user={profileUser}
+          anchorEl={profileAnchor}
+          onClose={() => { setProfileUser(null); setProfileAnchor(null); }}
+        />
+      )}
     </div>
   );
 }

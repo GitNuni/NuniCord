@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Mic, MicOff, Monitor, PhoneOff, Volume2, Headphones, VolumeX } from 'lucide-react';
 import { useVoiceStore } from '../../store/voice';
 import { useAuthStore } from '../../store/auth';
@@ -7,14 +7,17 @@ import {
   getSocket, watchLocalSpeaking
 } from '../../services/socket';
 import Avatar from '../common/Avatar';
+import UserProfileModal from '../common/UserProfileModal';
 
 export default function VoiceBar({ serverId, serverData }) {
   const {
     voiceChannels, activeChannelId, isMuted, isDeafened, isScreenSharing,
-    localStream, screenStream, localSpeaking,
+    localStream, screenStream, localSpeaking, peers,
     setLocalStream, setScreenStream, toggleMute, toggleDeafen, setActiveVoice, clearVoice,
   } = useVoiceStore();
   const { user } = useAuthStore();
+  const [profileUser, setProfileUser] = useState(null);
+  const [profileAnchor, setProfileAnchor] = useState(null);
 
   // Voice channels in this server
   const voiceChList = (serverData?.channels || []).filter(c => c.type === 'voice');
@@ -158,14 +161,17 @@ export default function VoiceBar({ serverId, serverData }) {
               isDeafened={isDeafened}
               isSpeaking={localSpeaking}
               isSelf
+              onClick={(e) => { setProfileAnchor(e.currentTarget); setProfileUser(user); }}
             />
           )}
           {members.map(m => (
             <VoiceMemberPill
               key={m.user_id}
-              user={{ id: m.user_id, username: m.username, avatar_url: m.avatar_url }}
+              user={{ id: m.user_id, username: m.username, display_name: m.username, avatar_url: m.avatar_url }}
               isMuted={m.self_mute}
               isDeafened={m.self_deaf}
+              isSpeaking={peers[m.user_id]?.isSpeaking}
+              onClick={(e) => { setProfileAnchor(e.currentTarget); setProfileUser({ id: m.user_id, username: m.username, display_name: m.username, avatar_url: m.avatar_url }); }}
             />
           ))}
           {totalInChannel === 0 && (
@@ -220,32 +226,42 @@ export default function VoiceBar({ serverId, serverData }) {
           </button>
         )}
       </div>
+      {profileUser && (
+        <UserProfileModal
+          user={profileUser}
+          anchorEl={profileAnchor}
+          onClose={() => { setProfileUser(null); setProfileAnchor(null); }}
+        />
+      )}
     </div>
   );
 }
 
-function VoiceMemberPill({ user, isMuted, isDeafened, isSpeaking, isSelf }) {
+function VoiceMemberPill({ user, isMuted, isDeafened, isSpeaking, isSelf, onClick }) {
   return (
-    <div
+    <button
+      onClick={onClick}
       className="flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 rounded-full"
       style={{
         background: isSpeaking
-          ? 'rgb(var(--nc-status-green-rgb, 52 199 89) / 0.15)'
+          ? 'rgb(var(--nc-status-green-rgb, 52 199 89) / 0.18)'
           : 'var(--nc-bg-tertiary)',
         border: isSpeaking
-          ? '1px solid rgb(var(--nc-status-green-rgb, 52 199 89) / 0.5)'
+          ? '1.5px solid rgb(var(--nc-status-green-rgb, 52 199 89) / 0.7)'
           : '1px solid rgba(var(--nc-divider-rgb), 0.3)',
-        transition: 'all 0.2s',
+        transition: 'all 0.15s',
+        cursor: 'pointer',
+        boxShadow: isSpeaking ? '0 0 8px rgb(var(--nc-status-green-rgb, 52 199 89) / 0.3)' : 'none',
       }}
       title={isSelf ? 'You' : (user?.display_name || user?.username)}
     >
       <Avatar user={user} size={18} />
-      <span className="text-xs max-w-[56px] truncate" style={{ color: 'var(--nc-text-normal)' }}>
+      <span className="text-xs max-w-[56px] truncate" style={{ color: isSpeaking ? 'var(--nc-header-primary)' : 'var(--nc-text-normal)' }}>
         {isSelf ? 'You' : (user?.display_name || user?.username || '').split('#')[0].substring(0, 8)}
       </span>
       {isMuted && <MicOff size={10} style={{ color: 'var(--nc-status-danger)', flexShrink: 0 }} />}
       {isDeafened && <VolumeX size={10} style={{ color: 'var(--nc-status-danger)', flexShrink: 0 }} />}
-    </div>
+    </button>
   );
 }
 

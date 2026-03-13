@@ -1,87 +1,118 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Music2, Plus, Trash2, X } from 'lucide-react';
-import { SOUNDS, playSound } from '../../services/sounds';
+import { SOUNDS, playSound, playCustomSound } from '../../services/sounds';
 import { getSocket } from '../../services/socket';
 import { useVoiceStore } from '../../store/voice';
-
-const STORAGE_KEY = 'nunicord_custom_sounds';
-
-function loadCustomSounds() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-  catch { return []; }
-}
-
-function saveCustomSounds(sounds) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(sounds));
-}
+import { useServerStore } from '../../store/servers';
+import api from '../../services/api';
 
 export default function Soundboard({ inChat = false }) {
   const [open, setOpen] = useState(false);
-  const [customSounds, setCustomSounds] = useState(loadCustomSounds);
+  const [serverSounds, setServerSounds] = useState([]);
   const [addingName, setAddingName] = useState('');
   const [showAdd, setShowAdd] = useState(false);
-  const { activeChannelId } = useVoiceStore();
+  const [panelPos, setPanelPos] = useState({ top: 0, left: 0 });
+  const { activeChannelId, activeServerId } = useVoiceStore();
+  const { activeServerId: storeServerId } = useServerStore();
+  const serverId = activeServerId || storeServerId;
+  const btnRef = useRef(null);
   const panelRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Close panel on outside click
+  // Load server sounds when panel opens or serverId changes
+  const loadSounds = useCallback(() => {
+    if (!serverId) return;
+    api.get(`/sounds/${serverId}`).then(r => setServerSounds(r.data)).catch(() => {});
+  }, [serverId]);
+
+  useEffect(() => {
+    if (open) loadSounds();
+  }, [open, loadSounds]);
+
+  // Real-time sound updates
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket || !serverId) return;
+    function onSoundCreate(sound) {
+      if (sound.server_id === serverId) setServerSounds(prev => [...prev, sound]);
+    }
+    function onSoundDelete({ id, server_id }) {
+      if (server_id === serverId) setServerSounds(prev => prev.filter(s => s.id !== id));
+    }
+    socket.on('SOUND_CREATE', onSoundCreate);
+    socket.on('SOUND_DELETE', onSoundDelete);
+    return () => { socket.off('SOUND_CREATE', onSoundCreate); socket.off('SOUND_DELETE', onSoundDelete); };
+  }, [serverId]);
+
+  function handleToggle() {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setPanelPos({ top: rect.top - 8, left: rect.right + 8 });
+    }
+    setOpen(o => !o);
+  }
+
   useEffect(() => {
     if (!open) return;
     function handler(e) {
-      if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false);
+      if (panelRef.current && !panelRef.current.contains(e.target) &&
+          btnRef.current && !btnRef.current.contains(e.target)) {
+        setOpen(false);
+      }
     }
     document.addEventListener('mousedown', handler);
     document.addEventListener('touchstart', handler);
     return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('touchstart', handler); };
   }, [open]);
 
-  function broadcast(soundId) {
+  function broadcast(soundId, soundUrl) {
     const socket = getSocket();
     if (socket && activeChannelId) {
-      socket.emit('SOUNDBOARD_PLAY', { channel_id: activeChannelId, sound_id: soundId });
+      socket.emit('SOUNDBOARD_PLAY', {
+        channel_id: activeChannelId,
+        sound_id: soundId || null,
+        sound_url: soundUrl || null,
+      });
     }
   }
 
   function handlePlay(soundId) {
     playSound(soundId);
-    broadcast(soundId);
+    broadcast(soundId, null);
   }
 
   function handlePlayCustom(sound) {
-    try {
-      const audio = new Audio(sound.url);
-      audio.volume = 0.6;
-      audio.play();
-    } catch (e) {
-      console.warn('Custom sound playback error:', e);
-    }
+    playCustomSound(sound.data);
+    broadcast(null, sound.data);
   }
 
-  function handleAddFile(e) {
+  async function handleAddFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      alert('Sound file must be under 2MB');
+    if (file.size > 3 * 1024 * 1024) {
+      alert('Sound file must be under 3MB');
       return;
     }
+    if (!serverId) { alert('Join a server first'); return; }
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = async ev => {
       const name = addingName.trim() || file.name.replace(/\.[^.]+$/, '');
-      const newSound = { id: Date.now().toString(), label: name, url: ev.target.result };
-      const updated = [...customSounds, newSound];
-      setCustomSounds(updated);
-      saveCustomSounds(updated);
-      setAddingName('');
-      setShowAdd(false);
+      try {
+        await api.post(`/sounds/${serverId}`, { label: name, data: ev.target.result });
+        setAddingName('');
+        setShowAdd(false);
+      } catch (err) {
+        alert(err.response?.data?.error || 'Failed to upload sound');
+      }
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   }
 
-  function deleteCustom(id) {
-    const updated = customSounds.filter(s => s.id !== id);
-    setCustomSounds(updated);
-    saveCustomSounds(updated);
+  async function deleteSound(id) {
+    if (!serverId) return;
+    await api.delete(`/sounds/${serverId}/${id}`).catch(() => {});
   }
 
   const btnStyle = inChat
@@ -89,9 +120,10 @@ export default function Soundboard({ inChat = false }) {
     : {};
 
   return (
-    <div className="relative" ref={panelRef}>
+    <div className="relative">
       <button
-        onClick={() => setOpen(o => !o)}
+        ref={btnRef}
+        onClick={handleToggle}
         title="Soundboard"
         style={inChat ? btnStyle : {}}
         className={inChat ? '' : `flex items-center justify-center gap-1 py-1 px-2 rounded text-xs transition-colors ${
@@ -104,19 +136,19 @@ export default function Soundboard({ inChat = false }) {
         {!inChat && <span className="hidden sm:inline ml-1">Board</span>}
       </button>
 
-      {open && (
-        <div style={{
-          position: 'absolute',
-          bottom: '100%',
-          right: inChat ? 0 : 'auto',
-          left: inChat ? 'auto' : 0,
+      {open && createPortal(
+        <div ref={panelRef} style={{
+          position: 'fixed',
+          top: panelPos.top,
+          left: panelPos.left,
+          transform: 'translateY(-100%)',
           marginBottom: 8,
           width: 240,
           background: '#040a0f',
           border: '1px solid rgba(0,212,255,0.2)',
           borderRadius: 4,
           padding: 10,
-          zIndex: 300,
+          zIndex: 9500,
           boxShadow: '0 0 24px rgba(0,0,0,0.9), 0 0 40px rgba(0,212,255,0.05)',
           maxHeight: '60vh',
           overflowY: 'auto',
@@ -144,7 +176,7 @@ export default function Soundboard({ inChat = false }) {
           {/* Add custom sound UI */}
           {showAdd && (
             <div style={{ marginBottom: 8, padding: '8px', background: 'rgba(0,212,255,0.04)', border: '1px solid rgba(0,212,255,0.1)', borderRadius: 3 }}>
-              <div style={{ fontSize: 9, color: '#2a5870', letterSpacing: '0.1em', marginBottom: 4 }}>ADD SOUND (MP3/WAV, max 2MB)</div>
+              <div style={{ fontSize: 9, color: '#2a5870', letterSpacing: '0.1em', marginBottom: 4 }}>ADD SOUND (MP3/WAV, max 3MB)</div>
               <input
                 placeholder="Sound name (optional)"
                 value={addingName}
@@ -163,7 +195,7 @@ export default function Soundboard({ inChat = false }) {
 
           {/* Built-in sounds */}
           <div style={{ fontSize: 9, color: '#1e3d50', letterSpacing: '0.1em', marginBottom: 4 }}>BUILT-IN</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: customSounds.length ? 8 : 0 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: serverSounds.length ? 8 : 0 }}>
             {SOUNDS.map(sound => (
               <button
                 key={sound.id}
@@ -189,12 +221,12 @@ export default function Soundboard({ inChat = false }) {
             ))}
           </div>
 
-          {/* Custom sounds */}
-          {customSounds.length > 0 && (
+          {/* Server custom sounds */}
+          {serverSounds.length > 0 && (
             <>
               <div style={{ fontSize: 9, color: '#1e3d50', letterSpacing: '0.1em', marginBottom: 4, marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(0,212,255,0.08)' }}>CUSTOM</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-                {customSounds.map(sound => (
+                {serverSounds.map(sound => (
                   <div key={sound.id} style={{ position: 'relative' }}>
                     <button
                       onClick={() => handlePlayCustom(sound)}
@@ -216,12 +248,12 @@ export default function Soundboard({ inChat = false }) {
                       }}
                       onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,255,136,0.12)'; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,255,136,0.04)'; }}
-                      title={sound.label}
+                      title={`${sound.label} · uploaded by ${sound.uploader_name}`}
                     >
                       🎵 {sound.label}
                     </button>
                     <button
-                      onClick={() => deleteCustom(sound.id)}
+                      onClick={() => deleteSound(sound.id)}
                       style={{ position: 'absolute', top: 2, right: 2, background: 'none', border: 'none', color: '#2a5870', cursor: 'pointer', padding: 2, display: 'flex' }}
                       onMouseEnter={e => e.currentTarget.style.color = '#ff3c00'}
                       onMouseLeave={e => e.currentTarget.style.color = '#2a5870'}
@@ -233,7 +265,8 @@ export default function Soundboard({ inChat = false }) {
               </div>
             </>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

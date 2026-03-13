@@ -144,6 +144,18 @@ router.get('/:serverId', authenticate, async (req, res) => {
   }
 });
 
+// GET /servers/:serverId/my-permissions
+router.get('/:serverId/my-permissions', authenticate, async (req, res) => {
+  try {
+    const { getUserServerPermissions } = require('../middleware/permissions');
+    const perms = await getUserServerPermissions(req.user.id, req.params.serverId);
+    res.json({ permissions: perms.toString() });
+  } catch (err) {
+    logger.error('Get permissions error:', err);
+    res.status(500).json({ error: 'Failed to get permissions' });
+  }
+});
+
 // PATCH /servers/:serverId
 router.patch(
   '/:serverId',
@@ -350,6 +362,18 @@ router.post('/join/:code', authenticate, async (req, res) => {
       }
     } catch (announcErr) {
       logger.warn('Join announcement failed:', announcErr.message);
+    }
+
+    // Notify existing members about the new member
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`server:${inv.server_id}`).emit('SERVER_MEMBER_ADD', {
+        server_id: inv.server_id,
+        user_id: req.user.id,
+        username: req.user.username,
+        display_name: req.user.display_name,
+        avatar_url: req.user.avatar_url,
+      });
     }
 
     res.json({ server_id: inv.server_id, server_name: inv.server_name });

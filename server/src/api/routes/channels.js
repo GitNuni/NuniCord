@@ -3,6 +3,8 @@ const { body, param, query: qv } = require('express-validator');
 const { query, transaction } = require('../../db');
 const { authenticate } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { requirePermission } = require('../middleware/permissions');
+const { Permissions } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 const router = express.Router();
@@ -25,6 +27,7 @@ router.get('/:channelId', authenticate, async (req, res) => {
 router.post(
   '/',
   authenticate,
+  requirePermission(Permissions.MANAGE_CHANNELS, req => req.body.server_id),
   [
     body('server_id').isUUID(),
     body('name').trim().isLength({ min: 1, max: 100 }),
@@ -62,7 +65,10 @@ router.post(
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
         [server_id, category_id || null, name, type, topic, pos.rows[0].pos, nsfw, slowmode_delay, user_limit, bitrate]
       );
-      res.status(201).json(result.rows[0]);
+      const channel = result.rows[0];
+      const io = req.app.get('io');
+      if (io) io.to(`server:${server_id}`).emit('CHANNEL_CREATE', channel);
+      res.status(201).json(channel);
     } catch (err) {
       logger.error('Create channel error:', err);
       res.status(500).json({ error: 'Failed to create channel' });
@@ -74,6 +80,10 @@ router.post(
 router.patch(
   '/:channelId',
   authenticate,
+  requirePermission(Permissions.MANAGE_CHANNELS, async req => {
+    const r = await require('../../db').query('SELECT server_id FROM channels WHERE id = $1', [req.params.channelId]);
+    return r.rows[0]?.server_id;
+  }),
   [
     body('name').optional().trim().isLength({ min: 1, max: 100 }),
     body('topic').optional().trim().isLength({ max: 1024 }),
@@ -99,7 +109,10 @@ router.patch(
         [name, topic, position, nsfw, slowmode_delay, category_id, req.params.channelId]
       );
       if (!result.rows[0]) return res.status(404).json({ error: 'Channel not found' });
-      res.json(result.rows[0]);
+      const channel = result.rows[0];
+      const io = req.app.get('io');
+      if (io) io.to(`server:${channel.server_id}`).emit('CHANNEL_UPDATE', channel);
+      res.json(channel);
     } catch (err) {
       logger.error('Update channel error:', err);
       res.status(500).json({ error: 'Failed to update channel' });
@@ -108,14 +121,22 @@ router.patch(
 );
 
 // DELETE /channels/:channelId
-router.delete('/:channelId', authenticate, async (req, res) => {
+router.delete('/:channelId', authenticate,
+  requirePermission(Permissions.MANAGE_CHANNELS, async req => {
+    const r = await require('../../db').query('SELECT server_id FROM channels WHERE id = $1', [req.params.channelId]);
+    return r.rows[0]?.server_id;
+  }),
+  async (req, res) => {
   try {
     const result = await query(
       'DELETE FROM channels WHERE id = $1 RETURNING id, server_id',
       [req.params.channelId]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Channel not found' });
-    res.json({ id: result.rows[0].id });
+    const { id, server_id } = result.rows[0];
+    const io = req.app.get('io');
+    if (io) io.to(`server:${server_id}`).emit('CHANNEL_DELETE', { id, server_id });
+    res.json({ id });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete channel' });
   }

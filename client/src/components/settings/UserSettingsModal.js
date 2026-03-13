@@ -7,6 +7,7 @@ import api from '../../services/api';
 import { toast } from '../../store/ui';
 import Avatar from '../common/Avatar';
 import Portal from '../common/Portal';
+import AdminModal from '../admin/AdminModal';
 
 const statusOptions = [
   { value: 'online', label: 'Online', color: 'nc-green' },
@@ -19,6 +20,7 @@ export default function UserSettingsModal({ onClose }) {
   const { user, logout, updateUser } = useAuthStore();
   const navigate = useNavigate();
   const [tab, setTab] = useState('profile');
+  const [showAdmin, setShowAdmin] = useState(false);
   const [form, setForm] = useState({
     display_name: user?.display_name || '',
     bio: user?.bio || '',
@@ -89,6 +91,7 @@ export default function UserSettingsModal({ onClose }) {
   ];
 
   return (
+    <>
     <Portal>
     <div className="fixed inset-0 bg-black/70 flex z-50 animate-fade-in">
       <div className="m-auto flex w-full max-w-4xl h-[85vh] bg-nc-bg-primary rounded-lg shadow-2xl overflow-hidden animate-slide-up">
@@ -114,7 +117,7 @@ export default function UserSettingsModal({ onClose }) {
             <div className="w-full h-px bg-nc-divider my-2" />
             {user?.is_admin && (
               <button
-                onClick={() => { onClose(); navigate('/admin'); }}
+                onClick={() => setShowAdmin(true)}
                 className="w-full text-left px-3 py-2 rounded text-sm text-nc-interactive-normal hover:text-nc-interactive-hover hover:bg-nc-bg-modifier-hover flex items-center gap-2 mb-0.5"
               >
                 <ShieldAlert size={16} className="text-nc-brand" />
@@ -299,6 +302,8 @@ export default function UserSettingsModal({ onClose }) {
       </div>
     </div>
     </Portal>
+    {showAdmin && <AdminModal onClose={() => setShowAdmin(false)} />}
+    </>
   );
 }
 

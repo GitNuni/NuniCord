@@ -53,4 +53,36 @@ export const useServerStore = create((set, get) => ({
     const { servers, activeServerId } = get();
     return servers.find(s => s.id === activeServerId) || null;
   },
+
+  // Real-time channel updates
+  addChannel: (channel) => {
+    set(produce(state => {
+      const server = state.servers.find(s => s.id === channel.server_id);
+      if (server) {
+        if (!server.channels) server.channels = [];
+        if (!server.channels.find(c => c.id === channel.id)) {
+          server.channels.push(channel);
+        }
+      }
+    }));
+  },
+
+  updateChannel: (channel) => {
+    set(produce(state => {
+      const server = state.servers.find(s => s.id === channel.server_id);
+      if (server?.channels) {
+        const idx = server.channels.findIndex(c => c.id === channel.id);
+        if (idx !== -1) Object.assign(server.channels[idx], channel);
+      }
+    }));
+  },
+
+  removeChannel: (channelId, serverId) => {
+    set(produce(state => {
+      const server = state.servers.find(s => s.id === serverId);
+      if (server?.channels) {
+        server.channels = server.channels.filter(c => c.id !== channelId);
+      }
+    }));
+  },
 }));
