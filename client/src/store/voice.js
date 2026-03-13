@@ -55,8 +55,9 @@ export const useVoiceStore = create((set, get) => ({
   },
 
   toggleDeafen: () => {
-    set(state => ({ isDeafened: !state.isDeafened }));
-    return !get().isDeafened;
+    const next = !get().isDeafened;
+    set({ isDeafened: next });
+    return next;
   },
 
   toggleVideo: async () => {
@@ -118,6 +119,34 @@ export const useVoiceStore = create((set, get) => ({
     set(produce(state => {
       if (state.peers[userId]) {
         state.peers[userId].isSpeaking = isSpeaking;
+      }
+    }));
+  },
+
+  // Server-wide voice channel membership (for sidebar display and VoiceBar)
+  voiceChannels: {}, // { channelId: [{ user_id, username, avatar_url, self_mute, self_deaf, self_stream }] }
+
+  setVoiceChannels: (data) => set({ voiceChannels: data }),
+
+  updateVoiceChannelMember: (channelId, userId, memberData) => {
+    set(produce(state => {
+      if (!state.voiceChannels[channelId]) state.voiceChannels[channelId] = [];
+      const idx = state.voiceChannels[channelId].findIndex(m => m.user_id === userId);
+      if (idx >= 0) {
+        Object.assign(state.voiceChannels[channelId][idx], memberData);
+      } else {
+        state.voiceChannels[channelId].push({ user_id: userId, ...memberData });
+      }
+    }));
+  },
+
+  removeVoiceChannelMember: (userId) => {
+    set(produce(state => {
+      for (const channelId of Object.keys(state.voiceChannels)) {
+        state.voiceChannels[channelId] = state.voiceChannels[channelId].filter(m => m.user_id !== userId);
+        if (state.voiceChannels[channelId].length === 0) {
+          delete state.voiceChannels[channelId];
+        }
       }
     }));
   },

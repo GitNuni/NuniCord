@@ -77,8 +77,24 @@ export function connectSocket(token) {
   socket.on('VOICE_STATE_UPDATE', (state) => {
     const { useAuthStore } = require('../store/auth');
     const currentUser = useAuthStore.getState().user;
-    if (state.user_id === currentUser?.id) return;
     const voiceStore = useVoiceStore.getState();
+
+    // Update server-wide voice channel tracking (everyone, including self)
+    if (!state.channel_id) {
+      voiceStore.removeVoiceChannelMember(state.user_id);
+    } else {
+      voiceStore.updateVoiceChannelMember(state.channel_id, state.user_id, {
+        username: state.display_name || state.username,
+        avatar_url: state.avatar_url,
+        self_mute: state.self_mute,
+        self_deaf: state.self_deaf,
+        self_stream: state.self_stream,
+      });
+    }
+
+    // Skip WebRTC peer management for self
+    if (state.user_id === currentUser?.id) return;
+
     if (!state.channel_id) {
       voiceStore.removePeer(state.user_id);
     } else {
@@ -101,6 +117,17 @@ export function connectSocket(token) {
     const currentUser = useAuthStore.getState().user;
     const voiceStore = useVoiceStore.getState();
     const others = members.filter(m => m.user_id !== currentUser?.id);
+
+    // Update server-wide voiceChannels for sidebar display
+    members.forEach(member => {
+      voiceStore.updateVoiceChannelMember(channel_id, member.user_id, {
+        username: member.display_name || member.username,
+        avatar_url: member.avatar_url,
+        self_mute: member.self_mute,
+        self_deaf: member.self_deaf,
+      });
+    });
+
     others.forEach(member => {
       voiceStore.addPeer(member.user_id, {
         channelId: channel_id,

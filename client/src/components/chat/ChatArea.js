@@ -53,12 +53,11 @@ export default function ChatArea({ serverId, serverData, isDM }) {
         onToggleSidebar={() => setMobileSidebarOpen(o => !o)}
       />
 
-      {/* Voice bar — embedded at top of every text channel */}
-      {!isDM && channelId && (
+      {/* Voice bar — shows active voice channels in this server */}
+      {!isDM && serverId && (
         <VoiceBar
-          channelId={channelId}
           serverId={serverId}
-          channelName={channelData?.name}
+          serverData={serverData}
         />
       )}
 

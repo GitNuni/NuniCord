@@ -1,250 +1,255 @@
-import React, { useEffect, useRef } from 'react';
-import { Mic, MicOff, Monitor, PhoneOff, Volume2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Mic, MicOff, Monitor, PhoneOff, Volume2, Headphones, VolumeX } from 'lucide-react';
 import { useVoiceStore } from '../../store/voice';
 import { useAuthStore } from '../../store/auth';
 import {
   joinVoiceChannel, leaveVoiceChannel, updateVoiceState,
-  createVoicePeerConnection, getSocket, watchLocalSpeaking
+  getSocket, watchLocalSpeaking
 } from '../../services/socket';
 import Avatar from '../common/Avatar';
 
-export default function VoiceBar({ channelId, serverId, channelName }) {
+export default function VoiceBar({ serverId, serverData }) {
   const {
-    activeChannelId, isMuted, isDeafened, isScreenSharing,
-    peers, localStream, screenStream, localSpeaking,
-    setLocalStream, setScreenStream, toggleMute, setActiveVoice, clearVoice,
+    voiceChannels, activeChannelId, isMuted, isDeafened, isScreenSharing,
+    localStream, screenStream, localSpeaking,
+    setLocalStream, setScreenStream, toggleMute, toggleDeafen, setActiveVoice, clearVoice,
   } = useVoiceStore();
   const { user } = useAuthStore();
-  const streamRef = useRef(null);
 
-  const isInThisChannel = activeChannelId === channelId;
+  // Voice channels in this server
+  const voiceChList = (serverData?.channels || []).filter(c => c.type === 'voice');
 
-  // All peers currently in this voice channel
-  const voiceMembers = Object.entries(peers).filter(
-    ([, p]) => p.channelId === channelId
+  // Active voice channels (have members or we're in them)
+  const activeVoiceChannels = voiceChList.filter(c =>
+    (voiceChannels[c.id] && voiceChannels[c.id].length > 0) || activeChannelId === c.id
   );
 
-  async function handleJoin() {
+  // Which channel tab is selected for display
+  const [selectedId, setSelectedId] = useState(null);
+  const displayChannelId = selectedId && activeVoiceChannels.find(c => c.id === selectedId)
+    ? selectedId
+    : activeChannelId || activeVoiceChannels[0]?.id;
+
+  if (activeVoiceChannels.length === 0) return null;
+
+  const displayChannel = voiceChList.find(c => c.id === displayChannelId);
+  const members = voiceChannels[displayChannelId] || [];
+  const isInDisplayChannel = activeChannelId === displayChannelId;
+  const selfInChannel = isInDisplayChannel && !!localStream;
+  const totalInChannel = members.length + (selfInChannel && !members.find(m => m.user_id === user?.id) ? 1 : 0);
+
+  async function handleJoin(channelId) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      streamRef.current = stream;
       setLocalStream(stream);
       setActiveVoice(channelId, serverId);
       joinVoiceChannel(channelId, serverId);
       watchLocalSpeaking(stream);
+      setSelectedId(channelId);
     } catch {
       alert('Could not access microphone. Check permissions.');
     }
   }
 
   function handleLeave() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-    }
-    leaveVoiceChannel(channelId, serverId);
     clearVoice();
+    leaveVoiceChannel(activeChannelId, serverId);
   }
 
   async function handleScreenShare() {
     if (isScreenSharing) {
       screenStream?.getTracks().forEach(t => t.stop());
       setScreenStream(null);
-      getSocket()?.emit('SCREEN_SHARE_STOP', { channel_id: channelId });
+      getSocket()?.emit('SCREEN_SHARE_STOP', { channel_id: activeChannelId });
+      updateVoiceState({ self_mute: isMuted, self_deaf: isDeafened, self_video: false, self_stream: false, channel_id: activeChannelId, server_id: serverId });
     } else {
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
         setScreenStream(stream);
-        getSocket()?.emit('SCREEN_SHARE_START', { channel_id: channelId });
+        getSocket()?.emit('SCREEN_SHARE_START', { channel_id: activeChannelId });
+        updateVoiceState({ self_mute: isMuted, self_deaf: isDeafened, self_video: false, self_stream: true, channel_id: activeChannelId, server_id: serverId });
         stream.getVideoTracks()[0].onended = () => {
           setScreenStream(null);
-          getSocket()?.emit('SCREEN_SHARE_STOP', { channel_id: channelId });
+          getSocket()?.emit('SCREEN_SHARE_STOP', { channel_id: activeChannelId });
+          updateVoiceState({ self_mute: isMuted, self_deaf: isDeafened, self_video: false, self_stream: false, channel_id: activeChannelId, server_id: serverId });
         };
-      } catch { /* user cancelled */ }
+      } catch { /* cancelled */ }
     }
   }
 
   function handleToggleMute() {
     const muted = toggleMute();
-    updateVoiceState({ self_mute: muted, self_deaf: isDeafened });
+    updateVoiceState({ self_mute: muted, self_deaf: isDeafened, self_stream: isScreenSharing, channel_id: activeChannelId, server_id: serverId });
   }
 
-  const totalInVoice = voiceMembers.length + (isInThisChannel ? 1 : 0);
+  function handleToggleDeafen() {
+    const deafened = toggleDeafen();
+    updateVoiceState({ self_mute: isMuted, self_deaf: deafened, self_stream: isScreenSharing, channel_id: activeChannelId, server_id: serverId });
+  }
+
+  const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
   return (
     <div
-      className="flex items-center gap-3 px-4 py-2 border-b"
       style={{
-        background: 'linear-gradient(90deg, #030a10 0%, #060f18 100%)',
-        borderColor: 'rgba(0,212,255,0.15)',
-        borderTop: '1px solid rgba(0,212,255,0.08)',
-        minHeight: '52px',
-        position: 'relative',
-        overflow: 'hidden',
+        background: 'var(--nc-bg-secondary)',
+        borderBottom: '1px solid rgba(var(--nc-divider-rgb), 0.35)',
+        flexShrink: 0,
       }}
     >
-      {/* Left accent line */}
-      <div
-        style={{
-          position: 'absolute',
-          left: 0, top: 0, bottom: 0, width: '2px',
-          background: totalInVoice > 0
-            ? 'linear-gradient(180deg, transparent, #00ff88, transparent)'
-            : 'linear-gradient(180deg, transparent, rgba(0,212,255,0.4), transparent)',
-        }}
-      />
-
-      {/* Icon + label */}
-      <div className="flex items-center gap-2 text-nc-channel-icon shrink-0" style={{ minWidth: 120 }}>
-        <Volume2 size={14} style={{ color: totalInVoice > 0 ? '#00ff88' : '#2a5870' }} />
-        <span
-          className="text-xs uppercase tracking-widest"
-          style={{ color: totalInVoice > 0 ? '#00ff88' : '#2a5870' }}
+      {/* Channel tabs — only shown if multiple active voice channels */}
+      {activeVoiceChannels.length > 1 && (
+        <div
+          className="flex gap-1 px-3 pt-2 overflow-x-auto"
+          style={{ scrollbarWidth: 'none' }}
         >
-          VOICE · {totalInVoice}
-        </span>
-      </div>
-
-      {/* Participant avatars */}
-      <div className="flex items-center gap-2 flex-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-        {/* Self, if in this channel */}
-        {isInThisChannel && (
-          <VoiceMember
-            key="self"
-            username={user?.display_name || user?.username || 'You'}
-            avatar={user?.avatar_url}
-            isMuted={isMuted}
-            isSpeaking={localSpeaking}
-            isSelf
-          />
-        )}
-        {/* Remote peers */}
-        {voiceMembers.map(([userId, peer]) => (
-          <VoiceMember
-            key={userId}
-            username={peer.username || userId}
-            avatar={peer.avatar}
-            isMuted={peer.isMuted}
-            isSpeaking={peer.isSpeaking}
-            isScreenSharing={peer.isScreenSharing}
-          />
-        ))}
-        {totalInVoice === 0 && (
-          <span className="text-xs" style={{ color: '#1e3d50' }}>
-            No one in voice
-          </span>
-        )}
-      </div>
-
-      {/* Controls */}
-      {isInThisChannel ? (
-        <div className="flex items-center gap-1 shrink-0">
-          <CtrlBtn
-            active={isScreenSharing}
-            onClick={handleScreenShare}
-            title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
-          >
-            <Monitor size={14} />
-          </CtrlBtn>
-          <CtrlBtn
-            danger={isMuted}
-            onClick={handleToggleMute}
-            title={isMuted ? 'Unmute' : 'Mute'}
-          >
-            {isMuted ? <MicOff size={14} /> : <Mic size={14} />}
-          </CtrlBtn>
-          <CtrlBtn danger onClick={handleLeave} title="Disconnect">
-            <PhoneOff size={14} />
-          </CtrlBtn>
+          {activeVoiceChannels.map(ch => (
+            <button
+              key={ch.id}
+              onClick={() => setSelectedId(ch.id)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium flex-shrink-0 transition-colors"
+              style={{
+                background: ch.id === displayChannelId
+                  ? 'rgb(var(--nc-brand-rgb) / 0.15)'
+                  : 'transparent',
+                color: ch.id === displayChannelId
+                  ? 'rgb(var(--nc-brand-rgb))'
+                  : 'var(--nc-interactive-normal)',
+                border: ch.id === displayChannelId
+                  ? '1px solid rgb(var(--nc-brand-rgb) / 0.3)'
+                  : '1px solid transparent',
+              }}
+            >
+              <Volume2 size={11} />
+              {ch.name}
+              {activeChannelId === ch.id && (
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: 'var(--nc-status-green)', flexShrink: 0,
+                }} />
+              )}
+            </button>
+          ))}
         </div>
-      ) : (
-        <button
-          onClick={handleJoin}
-          className="shrink-0 px-3 py-1 text-xs uppercase tracking-widest transition-all"
-          style={{
-            background: 'transparent',
-            border: '1px solid rgba(0,212,255,0.4)',
-            color: '#00d4ff',
-            clipPath: 'polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%)',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = 'rgba(0,212,255,0.12)';
-            e.currentTarget.style.boxShadow = '0 0 12px rgba(0,212,255,0.3)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.boxShadow = 'none';
-          }}
-        >
-          Join Voice
-        </button>
       )}
+
+      {/* Main bar */}
+      <div className="flex items-center gap-3 px-3 py-2" style={{ minHeight: 52 }}>
+        {/* Voice icon + label */}
+        <div className="flex items-center gap-2 flex-shrink-0" style={{ minWidth: 100 }}>
+          <Volume2 size={14} style={{ color: totalInChannel > 0 ? 'var(--nc-status-green)' : 'var(--nc-text-muted)' }} />
+          <div>
+            <div className="text-xs font-medium" style={{ color: 'var(--nc-header-secondary)', lineHeight: 1.2 }}>
+              {displayChannel?.name || 'Voice'}
+            </div>
+            <div className="text-xs" style={{ color: 'var(--nc-text-muted)', lineHeight: 1.2 }}>
+              {totalInChannel > 0 ? `${totalInChannel} connected` : 'Empty'}
+            </div>
+          </div>
+        </div>
+
+        {/* Participant avatars */}
+        <div className="flex items-center gap-1.5 flex-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+          {/* Self, if in this channel */}
+          {selfInChannel && !members.find(m => m.user_id === user?.id) && (
+            <VoiceMemberPill
+              user={user}
+              isMuted={isMuted}
+              isDeafened={isDeafened}
+              isSpeaking={localSpeaking}
+              isSelf
+            />
+          )}
+          {members.map(m => (
+            <VoiceMemberPill
+              key={m.user_id}
+              user={{ id: m.user_id, username: m.username, avatar_url: m.avatar_url }}
+              isMuted={m.self_mute}
+              isDeafened={m.self_deaf}
+            />
+          ))}
+          {totalInChannel === 0 && (
+            <span className="text-xs" style={{ color: 'var(--nc-text-muted)' }}>
+              No one here yet
+            </span>
+          )}
+        </div>
+
+        {/* Controls */}
+        {isInDisplayChannel ? (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {!isMobile && (
+              <VoiceCtrlBtn
+                active={isScreenSharing}
+                onClick={handleScreenShare}
+                title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
+              >
+                <Monitor size={14} />
+              </VoiceCtrlBtn>
+            )}
+            <VoiceCtrlBtn
+              active={isMuted}
+              onClick={handleToggleMute}
+              title={isMuted ? 'Unmute' : 'Mute'}
+            >
+              {isMuted ? <MicOff size={14} /> : <Mic size={14} />}
+            </VoiceCtrlBtn>
+            <VoiceCtrlBtn
+              active={isDeafened}
+              onClick={handleToggleDeafen}
+              title={isDeafened ? 'Undeafen' : 'Deafen'}
+            >
+              {isDeafened ? <VolumeX size={14} /> : <Headphones size={14} />}
+            </VoiceCtrlBtn>
+            <VoiceCtrlBtn danger onClick={handleLeave} title="Disconnect">
+              <PhoneOff size={14} />
+            </VoiceCtrlBtn>
+          </div>
+        ) : (
+          <button
+            onClick={() => handleJoin(displayChannelId)}
+            className="flex-shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors"
+            style={{
+              background: 'rgb(var(--nc-brand-rgb))',
+              color: '#fff',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            Join
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
-function VoiceMember({ username, avatar, isMuted, isSpeaking, isScreenSharing, isSelf }) {
+function VoiceMemberPill({ user, isMuted, isDeafened, isSpeaking, isSelf }) {
   return (
     <div
-      className="flex flex-col items-center gap-0.5 shrink-0"
-      style={{ minWidth: 44 }}
-      title={username}
+      className="flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 rounded-full"
+      style={{
+        background: isSpeaking
+          ? 'rgb(var(--nc-status-green-rgb, 52 199 89) / 0.15)'
+          : 'var(--nc-bg-tertiary)',
+        border: isSpeaking
+          ? '1px solid rgb(var(--nc-status-green-rgb, 52 199 89) / 0.5)'
+          : '1px solid rgba(var(--nc-divider-rgb), 0.3)',
+        transition: 'all 0.2s',
+      }}
+      title={isSelf ? 'You' : (user?.display_name || user?.username)}
     >
-      <div
-        className="relative"
-        style={{
-          width: 32, height: 32,
-          border: isSpeaking
-            ? '2px solid #00ff88'
-            : isSelf
-            ? '2px solid rgba(0,212,255,0.5)'
-            : '2px solid rgba(0,212,255,0.15)',
-          boxShadow: isSpeaking ? '0 0 8px rgba(0,255,136,0.6)' : 'none',
-          borderRadius: 0,
-          transition: 'border-color 0.2s, box-shadow 0.2s',
-        }}
-      >
-        <Avatar
-          user={{ id: username, username, avatar_url: avatar }}
-          size={28}
-        />
-        {isMuted && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: -3, right: -3,
-              background: '#ff3c00',
-              width: 12, height: 12,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            <MicOff size={8} color="#fff" />
-          </div>
-        )}
-        {isScreenSharing && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: -3, left: -3,
-              background: '#00d4ff',
-              width: 12, height: 12,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            <Monitor size={8} color="#040a0f" />
-          </div>
-        )}
-      </div>
-      <span
-        className="text-xxs truncate w-full text-center"
-        style={{ maxWidth: 44, color: isSpeaking ? '#00ff88' : '#2e5568' }}
-      >
-        {isSelf ? 'you' : username.split('#')[0].substring(0, 6)}
+      <Avatar user={user} size={18} />
+      <span className="text-xs max-w-[56px] truncate" style={{ color: 'var(--nc-text-normal)' }}>
+        {isSelf ? 'You' : (user?.display_name || user?.username || '').split('#')[0].substring(0, 8)}
       </span>
+      {isMuted && <MicOff size={10} style={{ color: 'var(--nc-status-danger)', flexShrink: 0 }} />}
+      {isDeafened && <VolumeX size={10} style={{ color: 'var(--nc-status-danger)', flexShrink: 0 }} />}
     </div>
   );
 }
 
-function CtrlBtn({ children, onClick, title, danger, active }) {
+function VoiceCtrlBtn({ children, onClick, title, danger, active }) {
   return (
     <button
       onClick={onClick}
@@ -252,26 +257,21 @@ function CtrlBtn({ children, onClick, title, danger, active }) {
       style={{
         width: 28, height: 28,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'transparent',
+        background: danger
+          ? 'rgb(var(--nc-red-rgb, 255 59 48) / 0.15)'
+          : active
+          ? 'rgb(var(--nc-red-rgb, 255 59 48) / 0.12)'
+          : 'var(--nc-bg-tertiary)',
         border: '1px solid',
         borderColor: danger
-          ? 'rgba(255,60,0,0.5)'
+          ? 'rgb(var(--nc-red-rgb, 255 59 48) / 0.4)'
           : active
-          ? 'rgba(0,212,255,0.6)'
-          : 'rgba(0,212,255,0.2)',
-        color: danger ? '#ff3c00' : active ? '#00d4ff' : '#5a8fa8',
+          ? 'rgb(var(--nc-red-rgb, 255 59 48) / 0.3)'
+          : 'rgba(var(--nc-divider-rgb), 0.3)',
+        borderRadius: 8,
+        color: danger || active ? 'var(--nc-red, #ff3b30)' : 'var(--nc-interactive-normal)',
         cursor: 'pointer',
         transition: 'all 0.15s',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.background = danger
-          ? 'rgba(255,60,0,0.15)'
-          : 'rgba(0,212,255,0.1)';
-        e.currentTarget.style.color = danger ? '#ff5a1f' : '#00d4ff';
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.background = 'transparent';
-        e.currentTarget.style.color = danger ? '#ff3c00' : active ? '#00d4ff' : '#5a8fa8';
       }}
     >
       {children}

@@ -2,9 +2,10 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Hash, Volume2, ChevronDown, ChevronRight, Plus, Settings,
-  BookOpen, Rss, Users, Lock, Megaphone
+  BookOpen, Rss, Users, Lock, Megaphone, MicOff
 } from 'lucide-react';
 import { useVoiceStore } from '../../store/voice';
+import { useAuthStore } from '../../store/auth';
 import { useUIStore } from '../../store/ui';
 import UserPanel from './UserPanel';
 import VoiceHUD from '../voice/VoiceHUD';
@@ -143,8 +144,8 @@ export default function ChannelSidebar({ serverId, serverData, onRefreshServer }
 
 function ChannelItem({ channel, isActive, onClick, serverId, onRefreshServer }) {
   const Icon = channelTypeIcons[channel.type] || Hash;
-  const voiceState = useVoiceStore();
-  const isInVoice = voiceState.activeChannelId === channel.id;
+  const { activeChannelId, voiceChannels } = useVoiceStore();
+  const isInVoice = activeChannelId === channel.id;
   const [showSettings, setShowSettings] = useState(false);
   const { unreadChannels, clearUnread } = useUIStore();
   const isUnread = !!unreadChannels[channel.id];
@@ -187,6 +188,12 @@ function ChannelItem({ channel, isActive, onClick, serverId, onRefreshServer }) 
           <Settings size={14} />
         </button>
       </div>
+
+      {/* Voice channel participants */}
+      {channel.type === 'voice' && (
+        <VoiceChannelParticipants channelId={channel.id} />
+      )}
+
       {showSettings && (
         <ChannelSettingsModal
           channel={channel}
@@ -196,5 +203,36 @@ function ChannelItem({ channel, isActive, onClick, serverId, onRefreshServer }) 
         />
       )}
     </>
+  );
+}
+
+function VoiceChannelParticipants({ channelId }) {
+  const { voiceChannels, activeChannelId, localStream } = useVoiceStore();
+  const { user } = useAuthStore();
+  const members = voiceChannels[channelId] || [];
+  const selfInChannel = activeChannelId === channelId && !!localStream;
+
+  if (members.length === 0 && !selfInChannel) return null;
+
+  return (
+    <div style={{ paddingLeft: 28, paddingBottom: 2 }}>
+      {selfInChannel && !members.find(m => m.user_id === user?.id) && (
+        <div className="flex items-center gap-1.5 py-0.5 px-2">
+          <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgb(var(--nc-brand-rgb) / 0.3)', flexShrink: 0 }} />
+          <span className="text-xs truncate" style={{ color: 'var(--nc-text-muted)' }}>
+            {user?.display_name || user?.username}
+          </span>
+        </div>
+      )}
+      {members.map(m => (
+        <div key={m.user_id} className="flex items-center gap-1.5 py-0.5 px-2">
+          <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--nc-bg-tertiary)', flexShrink: 0 }} />
+          <span className="text-xs truncate" style={{ color: 'var(--nc-text-muted)' }}>
+            {m.username}
+          </span>
+          {m.self_mute && <MicOff size={9} style={{ color: 'var(--nc-status-danger)', flexShrink: 0 }} />}
+        </div>
+      ))}
+    </div>
   );
 }

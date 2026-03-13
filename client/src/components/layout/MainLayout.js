@@ -8,6 +8,7 @@ import UserPanel from './UserPanel';
 import VoiceHUD from '../voice/VoiceHUD';
 import { useServerStore } from '../../store/servers';
 import { useUIStore } from '../../store/ui';
+import { useVoiceStore } from '../../store/voice';
 import api from '../../services/api';
 import DMList from '../chat/DMList';
 import WelcomeScreen from '../chat/WelcomeScreen';
@@ -109,6 +110,9 @@ function ServerLayout() {
     if (serverId) {
       setActiveServer(serverId);
       refreshServerData();
+      api.get(`/servers/${serverId}/voice`)
+        .then(r => useVoiceStore.getState().setVoiceChannels(r.data))
+        .catch(() => {});
     }
   }, [serverId]);
 

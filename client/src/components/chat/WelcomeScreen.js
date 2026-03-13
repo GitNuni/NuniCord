@@ -1,7 +1,10 @@
 import React from 'react';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Menu } from 'lucide-react';
+import { useUIStore } from '../../store/ui';
 
 export default function WelcomeScreen({ server }) {
+  const { setMobileSidebarOpen } = useUIStore();
+
   return (
     <div className="flex-1 flex items-center justify-center bg-nc-bg-primary">
       <div className="text-center max-w-md px-4">
@@ -15,9 +18,16 @@ export default function WelcomeScreen({ server }) {
               </div>
             )}
             <h1 className="text-3xl font-bold text-nc-header-primary mb-2">Welcome to {server.name}!</h1>
-            <p className="text-nc-text-muted text-sm">
+            <p className="text-nc-text-muted text-sm mb-6">
               {server.description || 'Select a channel to start chatting.'}
             </p>
+            <button
+              className="md:hidden nc-btn-primary px-8 py-3 text-sm flex items-center gap-2 mx-auto"
+              onClick={() => setMobileSidebarOpen(true)}
+            >
+              <Menu size={16} />
+              Browse Channels
+            </button>
           </>
         ) : (
           <>
@@ -25,12 +35,21 @@ export default function WelcomeScreen({ server }) {
               N
             </div>
             <h1 className="text-3xl font-bold text-nc-header-primary mb-2">Welcome to NuniCord!</h1>
-            <p className="text-nc-text-muted text-sm mb-4">
+            <p className="text-nc-text-muted text-sm mb-6">
               Select a server or start a direct message to get chatting.
             </p>
-            <div className="flex items-center gap-2 justify-center text-nc-text-muted text-sm">
-              <MessageSquare size={16} />
-              <span>Your conversations are waiting</span>
+            <div className="flex flex-col items-center gap-3">
+              <button
+                className="md:hidden nc-btn-primary px-8 py-3 text-sm flex items-center gap-2"
+                onClick={() => setMobileSidebarOpen(true)}
+              >
+                <Menu size={16} />
+                Browse Servers
+              </button>
+              <div className="hidden md:flex items-center gap-2 text-nc-text-muted text-sm">
+                <MessageSquare size={16} />
+                <span>Your conversations are waiting</span>
+              </div>
             </div>
           </>
         )}

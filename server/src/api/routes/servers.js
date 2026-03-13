@@ -221,6 +221,37 @@ router.post('/:serverId/leave', authenticate, async (req, res) => {
   }
 });
 
+// GET /servers/:serverId/voice — current voice states grouped by channel
+router.get('/:serverId/voice', authenticate, async (req, res) => {
+  try {
+    const member = await query(
+      'SELECT id FROM server_members WHERE server_id = $1 AND user_id = $2',
+      [req.params.serverId, req.user.id]
+    );
+    if (!member.rows[0]) return res.status(403).json({ error: 'Not a member' });
+
+    const result = await query(
+      `SELECT vs.user_id, vs.channel_id, vs.self_mute, vs.self_deaf, vs.self_video, vs.self_stream,
+              u.username, u.display_name, u.avatar_url
+       FROM voice_states vs
+       JOIN users u ON u.id = vs.user_id
+       WHERE vs.server_id = $1`,
+      [req.params.serverId]
+    );
+
+    // Group by channel_id
+    const byChannel = {};
+    for (const row of result.rows) {
+      if (!byChannel[row.channel_id]) byChannel[row.channel_id] = [];
+      byChannel[row.channel_id].push(row);
+    }
+    res.json(byChannel);
+  } catch (err) {
+    logger.error('Voice states error:', err);
+    res.status(500).json({ error: 'Failed to get voice states' });
+  }
+});
+
 // GET /servers/:serverId/members
 router.get('/:serverId/members', authenticate, async (req, res) => {
   try {
