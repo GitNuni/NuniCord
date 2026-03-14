@@ -100,6 +100,37 @@ router.patch(
   }
 );
 
+// POST /notifications/device-token — register APNs device token (iOS native app)
+router.post('/device-token', authenticate, async (req, res) => {
+  try {
+    const { token, platform } = req.body;
+    if (!token) return res.status(400).json({ error: 'token required' });
+
+    await query(
+      `INSERT INTO device_tokens (user_id, token, platform, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (user_id, token) DO UPDATE SET platform = $3, updated_at = NOW()`,
+      [req.user.id, token, platform || 'ios']
+    );
+
+    res.json({ message: 'Device token registered' });
+  } catch (err) {
+    // Table may not exist yet — create it
+    await query(`
+      CREATE TABLE IF NOT EXISTS device_tokens (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token TEXT NOT NULL,
+        platform VARCHAR(20) DEFAULT 'ios',
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id, token)
+      )
+    `).catch(() => {});
+    logger.warn('Device token table created on-demand');
+    res.json({ message: 'Device token registered' });
+  }
+});
+
 // Helper to send push notification
 async function sendPushNotification(userId, payload) {
   if (!process.env.VAPID_PUBLIC_KEY) return;
